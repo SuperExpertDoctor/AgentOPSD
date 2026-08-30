@@ -279,6 +279,10 @@ class ActorRolloutRefWorker(Worker):
                     'bias': "none"
                 }
                 actor_module = get_peft_model(actor_module, LoraConfig(**lora_config))
+                # PEFT initializes LoRA parameters in FP32. FSDP with
+                # use_orig_params=False requires a uniform dtype when it
+                # flattens the base model and adapter parameters.
+                actor_module.to(torch_dtype)
         torch.distributed.barrier()
 
         if self.rank == 0:
@@ -315,12 +319,28 @@ class ActorRolloutRefWorker(Worker):
         # We force turn off CPUOffload for actor because it causes incorrect results when using grad accumulation
         cpu_offload = None if role == "actor" else CPUOffload(offload_params=True)
         fsdp_strategy = self.config.actor.strategy
-        if fsdp_strategy == "fsdp":
+        use_single_gpu_lora = (
+            role == "actor"
+            and self._is_lora
+            and torch.distributed.get_world_size() == 1
+            and fsdp_config.get("single_gpu_lora", False)
+        )
+        if use_single_gpu_lora:
+            # FSDP1 keeps a full flat gradient on a world-size-one process even
+            # when the base model is frozen. A plain PEFT model avoids that
+            # allocation and is the practical single-GPU LoRA path.
+            actor_module_fsdp = actor_module.to(
+                torch.device(get_device_name(), get_torch_device().current_device())
+            )
+            print("Using plain PEFT actor for single-GPU LoRA training")
+        elif fsdp_strategy == "fsdp":
             actor_module_fsdp = FSDP(
                 actor_module,
                 cpu_offload=cpu_offload,
                 param_init_fn=init_fn,
-                use_orig_params=False,
+                # LoRA freezes the base model while adapters remain trainable;
+                # FSDP needs original parameters to preserve mixed grad flags.
+                use_orig_params=self._is_lora,
                 auto_wrap_policy=auto_wrap_policy,
                 device_id=get_torch_device().current_device(),
                 sharding_strategy=sharding_strategy,  # zero3
@@ -549,6 +569,8 @@ class ActorRolloutRefWorker(Worker):
             # get the original unwrapped module
             if fsdp_version(self.actor_module_fsdp) == 1:
                 self.actor_module = self.actor_module_fsdp._fsdp_wrapped_module
+            elif fsdp_version(self.actor_module_fsdp) == 0:
+                self.actor_module = self.actor_module_fsdp
 
             if self._is_offload_param:
                 offload_fsdp_model_to_cpu(self.actor_module_fsdp)
@@ -770,10 +792,14 @@ class ActorRolloutRefWorker(Worker):
                 if isinstance(self.actor_module_fsdp, FSDP):
                     self.actor_module_fsdp = self.actor_module_fsdp.cuda()
                     lora_params = layered_summon_lora_params(self.actor_module_fsdp)
-                    if dist.get_rank() == 0:
-                        save_file(lora_params, os.path.join(lora_save_path, "adapter_model.safetensors"))
-                        with open(os.path.join(lora_save_path, "adapter_config.json"), "w", encoding='utf-8') as f:
-                            json.dump(peft_config, f, ensure_ascii=False, indent=4)
+                else:
+                    from peft.utils.save_and_load import get_peft_model_state_dict
+
+                    lora_params = get_peft_model_state_dict(self.actor_module)
+                if dist.get_rank() == 0:
+                    save_file(lora_params, os.path.join(lora_save_path, "adapter_model.safetensors"))
+                    with open(os.path.join(lora_save_path, "adapter_config.json"), "w", encoding='utf-8') as f:
+                        json.dump(peft_config, f, ensure_ascii=False, indent=4)
             except Exception as e:
                 if dist.get_rank() == 0:
                     print(f"[rank-{self.rank}]: Save LoRA Adapter Error ({e})")
