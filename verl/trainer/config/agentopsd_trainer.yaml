@@ -1,0 +1,47 @@
+defaults:
+  - ppo_trainer
+  - _self_
+
+# Local assets prepared by download/download_agentopsd_assets.py.
+local_assets:
+  data_dir: /home/shuixia/users/houguoqiang/code/datasets
+  weights_dir: /home/shuixia/users/houguoqiang/code/weights
+  model_path: ${local_assets.weights_dir}/Qwen2.5-7B-Instruct
+  retriever_model: ${local_assets.weights_dir}/e5-base-v2
+  text_train_file: ${local_assets.data_dir}/verl-agent/text/train.parquet
+  text_val_file: ${local_assets.data_dir}/verl-agent/text/test.parquet
+  alfworld_dir: ${local_assets.data_dir}/alfworld
+  search_dir: ${local_assets.data_dir}/searchR1
+  search_train_file: ${local_assets.data_dir}/searchR1_processed_direct/train.parquet
+  search_val_file: ${local_assets.data_dir}/searchR1_processed_direct/test.parquet
+  search_index: ${local_assets.search_dir}/e5_Flat.index
+  search_corpus: ${local_assets.search_dir}/wiki-18.jsonl
+  webshop_dir: ${local_assets.data_dir}/webshop/data
+
+data:
+  train_files: ${local_assets.text_train_file}
+  val_files: ${local_assets.text_val_file}
+
+actor_rollout_ref:
+  model:
+    path: ${local_assets.model_path}
+
+critic:
+  model:
+    path: ${actor_rollout_ref.model.path}
+    tokenizer_path: ${actor_rollout_ref.model.path}
+
+reward_model:
+  model:
+    input_tokenizer: ${actor_rollout_ref.model.path}
+    path: ${actor_rollout_ref.model.path}
+
+env:
+  alfworld:
+    data_dir: ${local_assets.alfworld_dir}
+  search:
+    index_path: ${local_assets.search_index}
+    corpus_path: ${local_assets.search_corpus}
+    retriever_model_path: ${local_assets.retriever_model}
+  webshop:
+    data_dir: ${local_assets.webshop_dir}

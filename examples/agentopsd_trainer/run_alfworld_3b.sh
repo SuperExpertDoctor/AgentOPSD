@@ -4,6 +4,12 @@ set -x
 # This is the full method (belief_mult + signed). Drop the signed=true line for the unsigned variant.
 ENGINE=${1:-vllm}
 
+ASSET_DATA_DIR="/home/shuixia/users/houguoqiang/code/datasets"
+ASSET_WEIGHTS_DIR="/home/shuixia/users/houguoqiang/code/weights"
+MODEL_PATH="${ASSET_WEIGHTS_DIR}/Qwen2.5-3B-Instruct"
+TRAIN_DATA="${ASSET_DATA_DIR}/verl-agent/text/train.parquet"
+VAL_DATA="${ASSET_DATA_DIR}/verl-agent/text/test.parquet"
+
 num_cpus_per_env_worker=0.1
 
 # AgentOPSD (internal name: opsd) hyperparameters
@@ -16,19 +22,22 @@ train_data_size=16
 val_data_size=128
 group_size=8
 experiment_name="${AGENTOPSD_METHOD_NAME:-AgentOPSD}_alfworld_${granularity}_lambda${mult_lambda}_skill${skill_all}"
-export ALFWORLD_DATA=$HOME/data/alfworld
+export ALFWORLD_DATA="${ASSET_DATA_DIR}/alfworld"
 
 export WANDB_API_KEY=your_key_here
 
-python3 -m examples.data_preprocess.prepare \
-    --mode 'text' \
-    --train_data_size $train_data_size \
-    --val_data_size $val_data_size
+if [[ ! -f "$TRAIN_DATA" || ! -f "$VAL_DATA" ]]; then
+    python3 -m examples.data_preprocess.prepare \
+        --mode 'text' \
+        --local_dir "${ASSET_DATA_DIR}/verl-agent" \
+        --train_data_size $train_data_size \
+        --val_data_size $val_data_size
+fi
 
 python3 -m verl.trainer.main_opsd \
     algorithm.adv_estimator=grpo \
-    data.train_files=$HOME/data/verl-agent/text/train.parquet \
-    data.val_files=$HOME/data/verl-agent/text/test.parquet \
+    data.train_files=$TRAIN_DATA \
+    data.val_files=$VAL_DATA \
     data.train_batch_size=$train_data_size \
     data.val_batch_size=$val_data_size \
     data.max_prompt_length=2048 \
@@ -36,7 +45,7 @@ python3 -m verl.trainer.main_opsd \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.return_raw_chat=True \
-    actor_rollout_ref.model.path=Qwen/Qwen2.5-3B-Instruct \
+    local_assets.model_path=$MODEL_PATH \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=256 \

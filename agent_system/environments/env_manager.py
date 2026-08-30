@@ -42,6 +42,20 @@ def set_gamefile(infos, gamefile):
     return infos
 
 
+def _resolve_webshop_data_paths(config):
+    webshop_config = config.env.webshop
+    data_dir = webshop_config.get("data_dir")
+    if data_dir is None:
+        data_dir = os.path.join(os.path.dirname(__file__), 'env_package/webshop/webshop/data')
+    data_dir = os.path.expanduser(os.path.expandvars(str(data_dir)))
+
+    if webshop_config.use_small:
+        filenames = ('items_shuffle_1000.json', 'items_ins_v2_1000.json')
+    else:
+        filenames = ('items_shuffle.json', 'items_ins_v2.json')
+    return tuple(os.path.join(data_dir, filename) for filename in filenames)
+
+
 class SearchEnvironmentManager(EnvironmentManagerBase):
     """
     EnvironmentManager for SearchEnv.
@@ -628,6 +642,11 @@ def make_envs(config):
         val_envs = GymCardEnvironmentManager(_val_envs, projection_f, config)
         return envs, val_envs
     elif "alfworld" in config.env.env_name.lower():
+        alfworld_data_dir = config.env.alfworld.get("data_dir")
+        if alfworld_data_dir:
+            os.environ["ALFWORLD_DATA"] = os.path.abspath(
+                os.path.expanduser(os.path.expandvars(str(alfworld_data_dir)))
+            )
         from agent_system.environments.env_package.alfworld import build_alfworld_envs, alfworld_projection
         if config.env.env_name == 'alfworld/AlfredThorEnv':
             alf_config_path = os.path.join(os.path.dirname(__file__), 'env_package/alfworld/configs/config_tw.yaml')
@@ -663,12 +682,7 @@ def make_envs(config):
         return envs, val_envs
     elif "webshop" in config.env.env_name.lower():
         from agent_system.environments.env_package.webshop import build_webshop_envs, webshop_projection
-        if config.env.webshop.use_small:
-            file_path = os.path.join(os.path.dirname(__file__), 'env_package/webshop/webshop/data/items_shuffle_1000.json')
-            attr_path = os.path.join(os.path.dirname(__file__), 'env_package/webshop/webshop/data/items_ins_v2_1000.json')
-        else:
-            file_path = os.path.join(os.path.dirname(__file__), 'env_package/webshop/webshop/data/items_shuffle.json')
-            attr_path = os.path.join(os.path.dirname(__file__), 'env_package/webshop/webshop/data/items_ins_v2.json')
+        file_path, attr_path = _resolve_webshop_data_paths(config)
         env_kwargs = {
                     'observation_mode': 'text', 
                     'num_products': None, 

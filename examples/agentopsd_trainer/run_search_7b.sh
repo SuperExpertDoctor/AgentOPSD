@@ -4,6 +4,10 @@ set -x
 # This is the full method (belief_mult + signed). Drop the signed=true line for the unsigned variant.
 ENGINE=${1:-vllm}
 
+ASSET_DATA_DIR="/home/shuixia/users/houguoqiang/code/datasets"
+ASSET_WEIGHTS_DIR="/home/shuixia/users/houguoqiang/code/weights"
+MODEL_PATH="${ASSET_WEIGHTS_DIR}/Qwen2.5-7B-Instruct"
+
 export WANDB_API_KEY=your_key_here
 export HIGHLIGHT_CONFIGS='<search>:0,0,255;</search>:0,0,255;<information>:255,0,0;</information>:255,0,0'
 
@@ -19,8 +23,8 @@ train_data_size=128
 val_data_size=512
 group_size=8
 
-TRAIN_DATA="$HOME/data/searchR1_processed_direct/train.parquet"
-VAL_DATA="$HOME/data/searchR1_processed_direct/test.parquet"
+TRAIN_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/train.parquet"
+VAL_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/test.parquet"
 
 python3 -m verl.trainer.main_opsd \
     algorithm.adv_estimator=grpo \
@@ -33,7 +37,7 @@ python3 -m verl.trainer.main_opsd \
     data.filter_overlong_prompts=True \
     data.truncation='left' \
     data.return_raw_chat=True \
-    actor_rollout_ref.model.path=Qwen/Qwen2.5-7B-Instruct \
+    local_assets.model_path=$MODEL_PATH \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=0.1 \
     actor_rollout_ref.model.use_remove_padding=True \

@@ -3,17 +3,27 @@ Main entry point for OPSD (Bayesian Value Recursion for Token-Level Credit
 Assignment) training. Based on main_rlsd.py with OPSD-specific extensions.
 """
 
+import os
+
 import hydra
 import ray
 from omegaconf import OmegaConf
 
 
-@hydra.main(config_path="config", config_name="ppo_trainer", version_base=None)
+@hydra.main(config_path="config", config_name="agentopsd_trainer", version_base=None)
 def main(config):
     run_opsd(config)
 
 
 def run_opsd(config) -> None:
+    local_assets = config.get("local_assets")
+    if local_assets is not None:
+        alfworld_dir = local_assets.get("alfworld_dir")
+        if alfworld_dir:
+            os.environ["ALFWORLD_DATA"] = os.path.abspath(
+                os.path.expanduser(os.path.expandvars(str(alfworld_dir)))
+            )
+
     if not ray.is_initialized():
         from verl.trainer.constants_ppo import get_ppo_ray_runtime_env
 
