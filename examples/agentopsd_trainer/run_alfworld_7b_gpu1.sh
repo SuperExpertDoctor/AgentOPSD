@@ -3,10 +3,9 @@
 set -euo pipefail
 set -x
 
-# Single-GPU AgentOPSD run for physical GPU 1.
+# Single-GPU AgentOPSD run; the physical GPU is controlled by trainer.device in the config.
 # The default HF rollout reuses the FSDP model and avoids loading a second
 # inference engine. Set ENGINE=vllm only when the GPU has enough free memory.
-export CUDA_VISIBLE_DEVICES=1
 export ALFWORLD_DATA="/home/shuixia/users/houguoqiang/code/datasets/alfworld"
 
 ENGINE="${ENGINE:-hf}"
@@ -76,7 +75,7 @@ fi
     actor_rollout_ref.rollout.name="$ENGINE" \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.25 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.85 \
     actor_rollout_ref.rollout.enable_chunked_prefill=False \
     actor_rollout_ref.rollout.enforce_eager=True \
     actor_rollout_ref.rollout.free_cache_engine=False \
@@ -97,7 +96,7 @@ fi
     env.max_steps=50 \
     env.rollout.n="$group_size" \
     env.resources_per_worker.num_cpus="$num_cpus_per_env_worker" \
-    trainer.device=cuda \
+    trainer.device="[1]" \
     trainer.n_gpus_per_node=1 \
     trainer.nnodes=1 \
     trainer.critic_warmup=0 \

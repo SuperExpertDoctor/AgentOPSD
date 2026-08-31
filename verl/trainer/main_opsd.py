@@ -9,6 +9,8 @@ import hydra
 import ray
 from omegaconf import OmegaConf
 
+from verl.trainer.device_utils import configure_training_devices
+
 
 @hydra.main(config_path="config", config_name="agentopsd_trainer", version_base=None)
 def main(config):
@@ -16,6 +18,16 @@ def main(config):
 
 
 def run_opsd(config) -> None:
+    device_selection = configure_training_devices(config.trainer)
+    print(
+        "[device] backend={} selected_gpu_ids={} n_gpus_per_node={} nnodes={}".format(
+            device_selection.device_name,
+            device_selection.device_ids,
+            device_selection.n_gpus_per_node,
+            device_selection.nnodes,
+        )
+    )
+
     local_assets = config.get("local_assets")
     if local_assets is not None:
         alfworld_dir = local_assets.get("alfworld_dir")

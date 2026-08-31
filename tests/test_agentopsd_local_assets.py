@@ -32,9 +32,22 @@ def test_agentopsd_entrypoint_uses_agentopsd_config():
     assert 'config_name="agentopsd_trainer"' in source
 
 
+def test_agentopsd_config_uses_explicit_gpu_device_list():
+    config = yaml.safe_load(CONFIG_PATH.read_text())
+
+    assert config["trainer"]["device"] == [1]
+    assert config["actor_rollout_ref"]["rollout"]["gpu_memory_utilization"] == 0.85
+
+
+def test_agentopsd_entrypoint_exposes_device_configuration():
+    from verl.trainer import main_opsd
+
+    assert hasattr(main_opsd, "configure_training_devices")
+
+
 def test_agentopsd_scripts_use_local_models_and_datasets():
     scripts = sorted(SCRIPT_DIR.glob("*.sh"))
-    assert len(scripts) == 6
+    assert len(scripts) == 7
 
     for script in scripts:
         source = script.read_text()
@@ -42,6 +55,11 @@ def test_agentopsd_scripts_use_local_models_and_datasets():
         assert "Qwen/Qwen2.5" not in source
         assert DATA_DIR in source
         assert WEIGHTS_DIR in source
+        if script.name == "run_alfworld_7b_gpu1.sh":
+            assert 'trainer.device="[1]"' in source
+        else:
+            assert "trainer.device=cuda" in source
+        assert "actor_rollout_ref.rollout.gpu_memory_utilization=0.85" in source
 
 
 def test_search_retriever_launcher_uses_local_assets():

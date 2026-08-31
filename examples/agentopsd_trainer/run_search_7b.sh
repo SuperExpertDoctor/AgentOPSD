@@ -52,7 +52,7 @@ python3 -m verl.trainer.main_opsd \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=32 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=$ENGINE \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.85 \
     actor_rollout_ref.rollout.enable_chunked_prefill=False \
     actor_rollout_ref.rollout.enforce_eager=False \
     actor_rollout_ref.rollout.free_cache_engine=False \
@@ -74,6 +74,7 @@ python3 -m verl.trainer.main_opsd \
     env.rollout.n=$group_size \
     env.history_length=4 \
     env.search.search_url='http://0.0.0.0:8000/retrieve' \
+    trainer.device=cuda \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_search' \
