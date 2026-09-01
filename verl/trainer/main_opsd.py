@@ -9,7 +9,7 @@ import hydra
 import ray
 from omegaconf import OmegaConf
 
-from verl.trainer.device_utils import configure_training_devices
+from verl.trainer.device_utils import configure_training_devices, validate_tensor_parallel_size
 
 
 @hydra.main(config_path="config", config_name="agentopsd_trainer", version_base=None)
@@ -19,9 +19,15 @@ def main(config):
 
 def run_opsd(config) -> None:
     device_selection = configure_training_devices(config.trainer)
+    validate_tensor_parallel_size(
+        device_selection,
+        config.actor_rollout_ref.rollout.tensor_model_parallel_size,
+    )
     print(
-        "[device] backend={} selected_gpu_ids={} n_gpus_per_node={} nnodes={}".format(
+        "[device] backend={} requested={} resolved_physical_gpu_ids={} "
+        "n_gpus_per_node={} nnodes={}".format(
             device_selection.device_name,
+            device_selection.requested_device,
             device_selection.device_ids,
             device_selection.n_gpus_per_node,
             device_selection.nnodes,
