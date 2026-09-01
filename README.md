@@ -137,6 +137,17 @@ bash examples/agentopsd_trainer/run_search_3b.sh
 bash examples/agentopsd_trainer/run_webshop_3b.sh
 ```
 
+Select training GPUs only with the `trainer.device` hyperparameter. Pass an
+explicit list to bind exact physical GPU IDs:
+
+```bash
+bash examples/agentopsd_trainer/run_alfworld_3b.sh 'trainer.device=[1,5]'
+```
+
+Use `trainer.device=cuda` to select every CUDA GPU accessible to the process.
+The program derives the Ray GPU count from `trainer.device`; do not pass
+`trainer.n_gpus_per_node` for AgentOPSD runs.
+
 Hyperparameters are exposed at the top of every script. In the code the method is named `opsd`
 (`verl.trainer.main_opsd`, `algorithm.opsd.*`).
 

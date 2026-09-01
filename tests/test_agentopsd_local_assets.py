@@ -32,10 +32,11 @@ def test_agentopsd_entrypoint_uses_agentopsd_config():
     assert 'config_name="agentopsd_trainer"' in source
 
 
-def test_agentopsd_config_uses_explicit_gpu_device_list():
+def test_agentopsd_config_declares_device_as_the_device_selector():
     config = yaml.safe_load(CONFIG_PATH.read_text())
 
     assert config["trainer"]["device"] == [1]
+    assert config["trainer"]["n_gpus_per_node"] == 1
     assert config["actor_rollout_ref"]["rollout"]["gpu_memory_utilization"] == 0.85
 
 
@@ -59,6 +60,8 @@ def test_agentopsd_scripts_use_local_models_and_datasets():
             assert 'trainer.device="[1]"' in source
         else:
             assert "trainer.device=cuda" in source
+        assert "trainer.n_gpus_per_node" not in source
+        assert "$@" in source
         assert "actor_rollout_ref.rollout.gpu_memory_utilization=0.85" in source
 
 

@@ -97,7 +97,6 @@ fi
     env.rollout.n="$group_size" \
     env.resources_per_worker.num_cpus="$num_cpus_per_env_worker" \
     trainer.device="[1]" \
-    trainer.n_gpus_per_node=1 \
     trainer.nnodes=1 \
     trainer.critic_warmup=0 \
     trainer.logger="['console']" \

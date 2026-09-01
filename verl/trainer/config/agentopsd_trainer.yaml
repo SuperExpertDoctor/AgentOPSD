@@ -3,8 +3,10 @@ defaults:
   - _self_
 
 trainer:
-  # cuda selects the requested number of GPUs at random; lists select physical GPU IDs.
+  # Sole user-facing device selector: cuda uses all accessible GPUs; a list
+  # such as [1, 5] binds exactly those physical GPU IDs.
   device: [1]
+  # Internal compatibility field; configure_training_devices derives it from device.
   n_gpus_per_node: 1
   nnodes: 1
 
