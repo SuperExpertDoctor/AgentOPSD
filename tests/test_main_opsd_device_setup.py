@@ -49,3 +49,4 @@ def test_device_resolution_and_tp_validation_run_before_ray_init(monkeypatch, ca
     assert "requested=('1', '5')" in output
     assert "resolved_physical_gpu_ids=('1', '5')" in output
     assert "n_gpus_per_node=2" in output
+    assert "nnodes=1" in output
