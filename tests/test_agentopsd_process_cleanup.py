@@ -18,6 +18,7 @@ def process(
     cwd="/repo",
     cmdline=("python",),
     run_id=None,
+    inspection_complete=True,
 ):
     return cleanup.ProcessInfo(
         pid=pid,
@@ -28,7 +29,20 @@ def process(
         cwd=cwd,
         cmdline=tuple(cmdline),
         run_id=run_id,
+        inspection_complete=inspection_complete,
     )
+
+
+def write_proc_process(proc_root, pid, *, uid, cmdline):
+    process_dir = proc_root / str(pid)
+    process_dir.mkdir()
+    (process_dir / "status").write_text(
+        f"Name:\ttest\nState:\tS (sleeping)\nPPid:\t1\nUid:\t{uid}\t{uid}\t{uid}\t{uid}\n"
+    )
+    tail_fields = ["S"] + ["0"] * 18 + [str(pid * 10)]
+    (process_dir / "stat").write_text(f"{pid} (test) {' '.join(tail_fields)}\n")
+    (process_dir / "cmdline").write_bytes(b"\0".join(arg.encode() for arg in cmdline) + b"\0")
+    return process_dir
 
 
 def test_selects_old_launcher_driver_descendants_and_workers_only():
@@ -93,6 +107,72 @@ def test_process_inspection_permission_error_is_not_treated_as_exit(monkeypatch,
 
     with pytest.raises(cleanup.ProcessInspectionError, match="pid 123"):
         cleanup.read_process(123, tmp_path)
+
+
+def test_discovery_skips_foreign_uid_before_protected_reads(tmp_path):
+    write_proc_process(tmp_path, 1, uid=0, cmdline=("/sbin/init",))
+
+    assert list(cleanup.iter_processes(tmp_path, current_uid=1000)) == []
+
+
+def test_discovery_keeps_unrelated_same_uid_process_with_incomplete_metadata(
+    monkeypatch, tmp_path
+):
+    process_dir = write_proc_process(tmp_path, 20, uid=1000, cmdline=("ssh-agent",))
+
+    monkeypatch.setattr(
+        cleanup.os,
+        "readlink",
+        lambda path: (_ for _ in ()).throw(PermissionError("denied"))
+        if path == process_dir / "cwd"
+        else os.readlink(path),
+    )
+    monkeypatch.setattr(
+        cleanup,
+        "_read_environment_value",
+        lambda _path, _key: (_ for _ in ()).throw(PermissionError("denied")),
+    )
+
+    discovered = list(cleanup.iter_processes(tmp_path, current_uid=1000))
+
+    assert len(discovered) == 1
+    assert discovered[0].pid == 20
+    assert discovered[0].cwd == ""
+    assert discovered[0].run_id is None
+    assert discovered[0].inspection_complete is False
+
+
+def test_incomplete_agentopsd_driver_blocks_preflight_selection():
+    candidate = process(
+        20,
+        cwd="",
+        cmdline=("python", "-m", "verl.trainer.main_opsd"),
+        inspection_complete=False,
+    )
+
+    with pytest.raises(cleanup.ProcessInspectionError, match="pid 20"):
+        cleanup.select_preflight_targets(
+            [candidate],
+            repo_root="/repo",
+            previous_run_id=None,
+            previous_launcher=None,
+            current_uid=1000,
+            ignored_pids=set(),
+        )
+
+
+def test_strict_read_rejects_protected_optional_metadata(monkeypatch, tmp_path):
+    process_dir = write_proc_process(tmp_path, 20, uid=1000, cmdline=("ssh-agent",))
+    monkeypatch.setattr(
+        cleanup.os,
+        "readlink",
+        lambda path: (_ for _ in ()).throw(PermissionError("denied"))
+        if path == process_dir / "cwd"
+        else os.readlink(path),
+    )
+
+    with pytest.raises(cleanup.ProcessInspectionError, match="pid 20"):
+        cleanup.read_process(20, tmp_path)
 
 
 def test_terminate_rechecks_start_time_before_sigkill(monkeypatch):

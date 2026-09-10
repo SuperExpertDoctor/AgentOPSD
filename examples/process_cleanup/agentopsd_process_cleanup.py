@@ -54,6 +54,7 @@ class ProcessInfo:
     cwd: str
     cmdline: tuple[str, ...]
     run_id: str | None
+    inspection_complete: bool = True
 
     @property
     def identity(self) -> ProcessIdentity:
@@ -89,7 +90,7 @@ def _is_under(path: str, root: str) -> bool:
 
 def _belongs_to_repo(process: ProcessInfo, repo_root: str) -> bool:
     root = os.path.realpath(repo_root)
-    if _is_under(process.cwd, root):
+    if process.cwd and _is_under(process.cwd, root):
         return True
     return any(os.path.isabs(arg) and _is_under(arg, root) for arg in process.cmdline)
 
@@ -116,6 +117,16 @@ def _descendant_pids(processes: Sequence[ProcessInfo], roots: set[int]) -> set[i
     return descendants
 
 
+def _raise_if_incomplete_candidates(processes: Sequence[ProcessInfo]) -> None:
+    incomplete = sorted({item.pid for item in processes if not item.inspection_complete})
+    if incomplete:
+        pids = ",".join(str(pid) for pid in incomplete)
+        label = "pid" if len(incomplete) == 1 else "pids"
+        raise ProcessInspectionError(
+            f"cannot safely inspect candidate AgentOPSD {label} {pids}"
+        )
+
+
 def select_preflight_targets(
     processes: Sequence[ProcessInfo],
     *,
@@ -133,6 +144,13 @@ def select_preflight_targets(
         and item.pid not in ignored_pids
         and not _is_infrastructure(item)
     ]
+    recognizable_candidates = [
+        item
+        for item in eligible
+        if _has_python_module(item, DRIVER_MODULE)
+        or any(marker in item.command for marker in LEGACY_WORKER_MARKERS)
+    ]
+    _raise_if_incomplete_candidates(recognizable_candidates)
     by_pid = {item.pid: item for item in eligible}
     old_launcher = None
     if previous_launcher is not None:
@@ -162,6 +180,7 @@ def select_preflight_targets(
             or _is_legacy_worker(item, repo_root)
         )
     ]
+    _raise_if_incomplete_candidates((*primary_by_pid.values(), *remaining))
     return Selection(
         primary=tuple(sorted(primary_by_pid.values(), key=lambda item: item.pid)),
         remaining=tuple(sorted(remaining, key=lambda item: item.pid)),
@@ -206,10 +225,18 @@ def _read_environment_value(path: Path, key: str) -> str | None:
     return None
 
 
-def read_process(pid: int, proc_root: str | os.PathLike[str] = "/proc") -> ProcessInfo | None:
+def read_process(
+    pid: int,
+    proc_root: str | os.PathLike[str] = "/proc",
+    *,
+    expected_uid: int | None = None,
+    allow_incomplete: bool = False,
+) -> ProcessInfo | None:
     directory = Path(proc_root) / str(pid)
     try:
         uid, ppid, state = _read_status(directory / "status")
+        if expected_uid is not None and uid != expected_uid:
+            return None
         start_time = _parse_start_time(
             (directory / "stat").read_text(encoding="utf-8", errors="replace")
         )
@@ -218,26 +245,66 @@ def read_process(pid: int, proc_root: str | os.PathLike[str] = "/proc") -> Proce
             for item in (directory / "cmdline").read_bytes().split(b"\0")
             if item
         )
-        cwd = os.readlink(directory / "cwd")
-        run_id = _read_environment_value(directory / "environ", RUN_ID_ENV)
     except FileNotFoundError:
         return None
     except (PermissionError, OSError, ValueError) as exc:
         raise ProcessInspectionError(f"cannot inspect pid {pid}: {exc}") from exc
     if not cmdline:
         return None
-    return ProcessInfo(pid, ppid, uid, state, start_time, cwd, cmdline, run_id)
+
+    inspection_complete = True
+    try:
+        cwd = os.readlink(directory / "cwd")
+    except FileNotFoundError:
+        return None
+    except (PermissionError, OSError) as exc:
+        if not allow_incomplete:
+            raise ProcessInspectionError(f"cannot inspect pid {pid}: {exc}") from exc
+        cwd = ""
+        inspection_complete = False
+
+    try:
+        run_id = _read_environment_value(directory / "environ", RUN_ID_ENV)
+    except FileNotFoundError:
+        return None
+    except (PermissionError, OSError) as exc:
+        if not allow_incomplete:
+            raise ProcessInspectionError(f"cannot inspect pid {pid}: {exc}") from exc
+        run_id = None
+        inspection_complete = False
+
+    return ProcessInfo(
+        pid,
+        ppid,
+        uid,
+        state,
+        start_time,
+        cwd,
+        cmdline,
+        run_id,
+        inspection_complete,
+    )
 
 
-def iter_processes(proc_root: str | os.PathLike[str] = "/proc") -> Iterable[ProcessInfo]:
+def iter_processes(
+    proc_root: str | os.PathLike[str] = "/proc",
+    *,
+    current_uid: int | None = None,
+) -> Iterable[ProcessInfo]:
     root = Path(proc_root)
+    owner = os.getuid() if current_uid is None else current_uid
     try:
         entries = sorted(root.iterdir(), key=lambda item: item.name)
     except (FileNotFoundError, PermissionError, OSError) as exc:
         raise ProcessInspectionError(f"cannot inspect process table: {exc}") from exc
     for entry in entries:
         if entry.name.isdigit():
-            item = read_process(int(entry.name), root)
+            item = read_process(
+                int(entry.name),
+                root,
+                expected_uid=owner,
+                allow_incomplete=True,
+            )
             if item is not None:
                 yield item
 
