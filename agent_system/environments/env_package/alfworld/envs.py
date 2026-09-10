@@ -61,6 +61,15 @@ class AlfworldWorker:
     def __init__(self, config, seed, base_env):
         self.env = base_env.init_env(batch_size=1)  # Each worker holds only one sub-environment
         self.env.seed(seed)
+
+    def close(self):
+        """Close the environment held by this actor."""
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+        close = getattr(self.env, "close", None)
+        if callable(close):
+            close()
     
     def step(self, action):
         """Execute a step in the environment"""
@@ -98,9 +107,19 @@ class AlfworldEnvs(gym.Env):
         self.num_processes = env_num * group_n
         self.group_n = group_n
 
-        # Create Ray remote actors instead of processes
-        env_worker = ray.remote(**resources_per_worker)(AlfworldWorker)
         self.workers = []
+        self._closed = False
+        worker_options = dict(resources_per_worker)
+        run_id = os.environ.get("AGENTOPSD_RUN_ID")
+        if run_id:
+            runtime_env = dict(worker_options.get("runtime_env") or {})
+            env_vars = dict(runtime_env.get("env_vars") or {})
+            env_vars["AGENTOPSD_RUN_ID"] = run_id
+            runtime_env["env_vars"] = env_vars
+            worker_options["runtime_env"] = runtime_env
+
+        # Create Ray remote actors instead of processes
+        env_worker = ray.remote(**worker_options)(AlfworldWorker)
         for i in range(self.num_processes):
             worker = env_worker.remote(config, seed + (i // self.group_n), base_env)
             self.workers.append(worker)
@@ -195,12 +214,34 @@ class AlfworldEnvs(gym.Env):
         return self.prev_admissible_commands
 
     def close(self):
-        """
-        Close all workers
-        """
-        # Kill all Ray actors
-        for worker in self.workers:
-            ray.kill(worker)
+        """Close and kill all environment actors; safe to call repeatedly."""
+        if self._closed:
+            return
+
+        workers = list(self.workers)
+        close_futures = []
+        for worker in workers:
+            try:
+                close_futures.append(worker.close.remote())
+            except Exception:
+                pass
+        if close_futures:
+            try:
+                ray.get(close_futures, timeout=5)
+            except Exception:
+                pass
+        for worker in workers:
+            try:
+                ray.kill(worker, no_restart=True)
+            except TypeError:
+                try:
+                    ray.kill(worker)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        self.workers = []
+        self._closed = True
 
 def build_alfworld_envs(alf_config_path, seed, env_num, group_n, resources_per_worker, is_train=True, env_kwargs={}):
     return AlfworldEnvs(alf_config_path, seed, env_num, group_n, resources_per_worker, is_train, env_kwargs)
