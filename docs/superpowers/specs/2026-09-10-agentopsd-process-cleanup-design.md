@@ -70,6 +70,8 @@ they own executors, subprocesses, or Ray actors.
 A process is eligible only when its effective owner is the current user.
 Preflight then builds the cleanup set from:
 
+- the previous launcher recorded for this repository, after validating its PID
+  and process start time, plus its recursive descendants;
 - live `python -m verl.trainer.main_opsd` drivers associated with the current
   repository;
 - recursive descendants of those drivers;
@@ -83,18 +85,21 @@ unambiguous repository path in the command line. Marker matching alone is not
 enough for drivers. Legacy worker matching is limited to exact AgentOPSD actor
 class markers and the repository association check.
 
-The cleaner explicitly excludes itself, its launcher, zombie processes, and
-Ray infrastructure. It never uses `ray stop`, broad `pkill`, or process-group
-termination because a process group or Ray cluster may be shared.
+The cleaner explicitly excludes itself, the new launcher, zombie processes,
+and Ray infrastructure. A validated older launcher is a target so that a
+second invocation can replace a script that is still preparing data and has
+not started `main_opsd` yet. The cleaner never uses `ray stop`, broad `pkill`,
+or process-group termination because a process group or Ray cluster may be
+shared.
 
 ## Termination protocol
 
-The cleaner sends `SIGTERM` to selected old drivers first to allow their normal
-cleanup handlers to run. It waits for a bounded grace period, refreshes process
-state, then sends `SIGTERM` to any remaining selected descendants and workers.
-After a second bounded wait it sends `SIGKILL` only to survivors whose owner,
-start time, command, working directory, and run id still match the captured
-record.
+The cleaner sends `SIGTERM` to selected old drivers and a validated old
+launcher first to allow their normal cleanup handlers to run. It waits for a
+bounded grace period, refreshes process state, then sends `SIGTERM` to any
+remaining selected descendants and workers. After a second bounded wait it
+sends `SIGKILL` only to survivors whose owner, start time, command, working
+directory, and run id still match the captured record.
 
 Rechecking identity before every destructive signal prevents a recycled PID
 from being targeted. Failure to inspect or terminate a selected process makes
@@ -105,8 +110,9 @@ preflight fail; training is not launched with a partially cleaned prior run.
 Runtime state is stored below `${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}` in a
 per-user, per-repository namespace. The repository namespace is derived from a
 stable digest of the resolved repository root. State contains the run id,
-launcher PID, launcher path, repository root, and creation timestamp. It must
-not contain credentials or the full training command.
+launcher PID, launcher process start time, launcher path, repository root, and
+creation timestamp. It must not contain credentials or the full training
+command.
 
 State writes use a temporary file and atomic rename. Exit cleanup removes the
 state only when it still names the exiting run.
