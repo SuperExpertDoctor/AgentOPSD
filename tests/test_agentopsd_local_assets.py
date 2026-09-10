@@ -56,6 +56,10 @@ def test_agentopsd_scripts_use_local_models_and_datasets():
         assert "Qwen/Qwen2.5" not in source
         assert DATA_DIR in source
         assert WEIGHTS_DIR in source
+        assert "../process_cleanup/agentopsd_process_cleanup.sh" in source
+        assert "agentopsd_cleanup_setup" in source
+        assert "verl.trainer.agentopsd_cleanup preflight" not in source
+        assert "flock" not in source
         if script.name == "run_alfworld_7b_gpu1.sh":
             assert 'trainer.device="[1]"' in source
         else:

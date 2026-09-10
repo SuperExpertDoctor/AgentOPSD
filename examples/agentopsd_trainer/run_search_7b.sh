@@ -1,4 +1,12 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
 set -x
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+source "${SCRIPT_DIR}/../process_cleanup/agentopsd_process_cleanup.sh"
+agentopsd_cleanup_setup "$PYTHON_BIN"
 # AgentOPSD training script (paper name: AgentOPSD; internal impl name: opsd).
 # Set AGENTOPSD_METHOD_NAME to re-brand the run/experiment name in one place.
 # This is the full method (belief_mult + signed). Drop the signed=true line for the unsigned variant.
@@ -26,7 +34,7 @@ group_size=8
 TRAIN_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/train.parquet"
 VAL_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/test.parquet"
 
-python3 -m verl.trainer.main_opsd \
+"$PYTHON_BIN" -m verl.trainer.main_opsd \
     algorithm.adv_estimator=grpo \
     data.train_files=$TRAIN_DATA \
     data.val_files=$VAL_DATA \
