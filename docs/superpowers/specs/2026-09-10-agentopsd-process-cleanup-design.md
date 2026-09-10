@@ -40,19 +40,25 @@ training begins.
 The setup function:
 
 1. Resolves the repository root and launcher path.
-2. Takes a repository-scoped exclusive transaction lock.
-3. Reads the previous run record when present.
-4. Creates and exports a unique `AGENTOPSD_RUN_ID` and launcher PID.
-5. Runs preflight cleanup and refuses to continue if cleanup fails.
-6. Writes the current run record atomically.
-7. Installs an exit trap that cleans the current run while preserving the
+2. Creates and exports a unique `AGENTOPSD_RUN_ID` and launcher PID.
+3. Under a short repository-scoped lock, reads the previous run record, takes
+   a process snapshot, and atomically publishes the new run claim.
+4. Releases the lock and terminates the old launcher, drivers, descendants,
+   environment workers, and training workers selected from that snapshot.
+5. Takes a fresh process snapshot to catch children spawned while the old
+   launcher was stopping, and terminates any remaining old-run processes.
+6. Reacquires the lock and verifies that the run record still names this run;
+   otherwise a newer launcher has replaced it and this launcher exits.
+7. Refuses to continue if cleanup or final ownership validation fails.
+8. Installs an exit trap that cleans the current run while preserving the
    launcher's original exit status.
-8. Releases the transaction lock before data preparation or training begins.
 
-The lock covers discovery, cleanup, and publication of the new run record. It
-is then released so a later launcher can intentionally replace the running
-task. Therefore two launchers from the same checkout cannot race through
-preflight, while the newer launcher is still able to terminate the older run.
+The lock protects each state transition and its associated snapshot, but is not
+held while waiting for processes to exit. The newest launcher wins by replacing
+the state claim. Every launcher revalidates ownership before returning from
+preflight, so a launcher superseded during cleanup cannot proceed to training.
+This also lets the replaced launcher's exit trap run without deadlocking on a
+lock held by the replacement.
 
 ### In-process resource cleanup
 
@@ -115,7 +121,9 @@ creation timestamp. It must not contain credentials or the full training
 command.
 
 State writes use a temporary file and atomic rename. Exit cleanup removes the
-state only when it still names the exiting run.
+state under the same lock only when it still names the exiting run. A failed
+preflight also removes only its own claim; it cannot erase a newer launcher's
+state.
 
 ## Shell integration
 
