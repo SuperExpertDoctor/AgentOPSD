@@ -34,7 +34,12 @@ actor_rollout_ref:
   model:
     path: ${local_assets.model_path}
   rollout:
-    gpu_memory_utilization: 0.85
+    # Keep vLLM's profiling budget positive for the 3B SPMD rollout while
+    # leaving headroom for FSDP parameter swaps and log-prob computation.
+    gpu_memory_utilization: 0.5
+    max_num_batched_tokens: 4096
+    max_num_seqs: 128
+    enforce_eager: true
 
 critic:
   model:
@@ -49,6 +54,7 @@ reward_model:
 env:
   alfworld:
     data_dir: ${local_assets.alfworld_dir}
+    actor_startup_batch_size: 16
   search:
     index_path: ${local_assets.search_index}
     corpus_path: ${local_assets.search_corpus}

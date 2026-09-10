@@ -658,13 +658,43 @@ def make_envs(config):
         env_kwargs = {
             'eval_dataset': config.env.alfworld.eval_dataset, # 'eval_in_distribution' or 'eval_out_of_distribution'
         }
-        _envs = build_alfworld_envs(alf_config_path, config.env.seed, config.data.train_batch_size, group_n, is_train=True, env_kwargs=env_kwargs, resources_per_worker=resources_per_worker)
-        _val_envs = build_alfworld_envs(alf_config_path, config.env.seed + 1000, config.data.val_batch_size, 1, is_train=False, env_kwargs=env_kwargs, resources_per_worker=resources_per_worker)
-        
-        projection_f = partial(alfworld_projection)
-        envs = AlfWorldEnvironmentManager(_envs, projection_f, config)
-        val_envs = AlfWorldEnvironmentManager(_val_envs, projection_f, config)
-        return envs, val_envs
+        startup_batch_size = config.env.alfworld.get("actor_startup_batch_size", 16)
+        _envs = None
+        _val_envs = None
+        try:
+            _envs = build_alfworld_envs(
+                alf_config_path,
+                config.env.seed,
+                config.data.train_batch_size,
+                group_n,
+                is_train=True,
+                env_kwargs=env_kwargs,
+                resources_per_worker=resources_per_worker,
+                startup_batch_size=startup_batch_size,
+            )
+            _val_envs = build_alfworld_envs(
+                alf_config_path,
+                config.env.seed + 1000,
+                config.data.val_batch_size,
+                1,
+                is_train=False,
+                env_kwargs=env_kwargs,
+                resources_per_worker=resources_per_worker,
+                startup_batch_size=startup_batch_size,
+            )
+
+            projection_f = partial(alfworld_projection)
+            envs = AlfWorldEnvironmentManager(_envs, projection_f, config)
+            val_envs = AlfWorldEnvironmentManager(_val_envs, projection_f, config)
+            return envs, val_envs
+        except Exception:
+            for environment in (_envs, _val_envs):
+                if environment is not None:
+                    try:
+                        environment.close()
+                    except Exception:
+                        pass
+            raise
     elif "sokoban" in config.env.env_name.lower():
         from agent_system.environments.env_package.sokoban import build_sokoban_envs, sokoban_projection
         env_kwargs = {
