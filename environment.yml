@@ -228,6 +228,7 @@ dependencies:
     - tatsu==5.8.3
     - tensordict==0.8.3
     - termcolor==3.3.0
+    - tensorboard==2.20.0
     - textworld==1.6.2
     - thinc==8.3.13
     - tiktoken==0.12.0
@@ -261,4 +262,3 @@ dependencies:
     - yarl==1.23.0
     - zipp==3.23.1
 prefix: /usr/local/conda/envs/verl-agent
-
