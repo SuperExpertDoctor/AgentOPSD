@@ -30,6 +30,12 @@ agentopsd_cleanup_setup() {
 _agentopsd_cleanup_on_exit() {
     local exit_code="${1:-0}"
     trap - EXIT INT TERM
+    if declare -F agentopsd_search_cleanup >/dev/null; then
+        if ! agentopsd_search_cleanup; then
+            echo "Retrieval cleanup could not be verified." >&2
+            if [[ "$exit_code" -eq 0 ]]; then exit_code=1; fi
+        fi
+    fi
     "$AGENTOPSD_CLEANUP_PYTHON" "$AGENTOPSD_CLEANUP_PROGRAM" cleanup \
         --repo-root "$AGENTOPSD_REPO_ROOT" \
         --launcher "$AGENTOPSD_LAUNCHER_PATH" \

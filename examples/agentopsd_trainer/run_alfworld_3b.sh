@@ -100,7 +100,7 @@ fi
     env.rollout.n=$group_size \
     env.resources_per_worker.num_cpus=$num_cpus_per_env_worker \
     env.alfworld.actor_startup_batch_size=16 \
-    trainer.device="[0]" \
+    trainer.device="[2,3]" \
     trainer.critic_warmup=0 \
     trainer.logger=['console','tensorboard'] \
     trainer.project_name='verl_agent_alfworld' \
@@ -109,7 +109,6 @@ fi
     trainer.nnodes=1 \
     trainer.save_freq=50 \
     trainer.resume_mode=auto \
-    trainer.checkpoint_dir="checkpoints/${experiment_name}" \
     trainer.test_freq=5 \
     trainer.total_epochs=150 \
     trainer.val_before_train=True $@

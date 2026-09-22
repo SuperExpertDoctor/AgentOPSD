@@ -10,7 +10,11 @@ agentopsd_cleanup_setup "$PYTHON_BIN"
 # AgentOPSD training script (paper name: AgentOPSD; internal impl name: opsd).
 # Set AGENTOPSD_METHOD_NAME to re-brand the run/experiment name in one place.
 # This is the full method (belief_mult + signed). Drop the signed=true line for the unsigned variant.
-ENGINE=${1:-vllm}
+ENGINE=vllm
+if [[ "${1:-}" == "vllm" || "${1:-}" == "sglang" ]]; then
+    ENGINE="$1"
+    shift
+fi
 
 ASSET_DATA_DIR="/home/shuixia/users/houguoqiang/code/datasets"
 ASSET_WEIGHTS_DIR="/home/shuixia/users/houguoqiang/code/weights"
@@ -34,6 +38,12 @@ group_size=8
 TRAIN_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/train.parquet"
 VAL_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/test.parquet"
 
+source "${SCRIPT_DIR}/../search/retriever/training_service.sh"
+agentopsd_search_setup "$@"
+if [[ "${RETRIEVAL_CHECK_ONLY:-0}" == "1" ]]; then
+    exit 0
+fi
+
 "$PYTHON_BIN" -m verl.trainer.main_opsd \
     algorithm.adv_estimator=grpo \
     data.train_files=$TRAIN_DATA \
@@ -50,21 +60,23 @@ VAL_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/test.parquet"
     actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=0.1 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=256 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=16 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
-    actor_rollout_ref.actor.fsdp_config.param_offload=False \
+    actor_rollout_ref.actor.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=32 \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=$ENGINE \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.85 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
+    actor_rollout_ref.rollout.max_num_batched_tokens=4096 \
+    actor_rollout_ref.rollout.max_num_seqs=128 \
     actor_rollout_ref.rollout.enable_chunked_prefill=False \
-    actor_rollout_ref.rollout.enforce_eager=False \
-    actor_rollout_ref.rollout.free_cache_engine=False \
-    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=32 \
+    actor_rollout_ref.rollout.enforce_eager=True \
+    actor_rollout_ref.rollout.free_cache_engine=True \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.use_invalid_action_penalty=True \
     actor_rollout_ref.actor.invalid_action_penalty_coef=0.01 \
@@ -81,10 +93,11 @@ VAL_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/test.parquet"
     env.max_steps=4 \
     env.rollout.n=$group_size \
     env.history_length=4 \
-    env.search.search_url='http://0.0.0.0:8000/retrieve' \
-    trainer.device=cuda \
+    env.search.search_url="$SEARCH_URL" \
+    env.search.max_concurrent_requests=8 \
+    trainer.device="[1,2]" \
     trainer.critic_warmup=0 \
-    trainer.logger=['console','wandb'] \
+    trainer.logger=['console','tensorboard'] \
     trainer.project_name='verl_agent_search' \
     trainer.experiment_name=$experiment_name \
     trainer.ray_wait_register_center_timeout=600 \
@@ -92,4 +105,4 @@ VAL_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/test.parquet"
     trainer.save_freq=-1 \
     trainer.test_freq=150 \
     trainer.total_training_steps=150 \
-    trainer.val_before_train=False $@
+    trainer.val_before_train=False "$@"

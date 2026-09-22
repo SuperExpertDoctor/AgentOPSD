@@ -10,7 +10,11 @@ agentopsd_cleanup_setup "$PYTHON_BIN"
 # AgentOPSD training script (paper name: AgentOPSD; internal impl name: opsd).
 # Set AGENTOPSD_METHOD_NAME to re-brand the run/experiment name in one place.
 # This is the full method (belief_mult + signed). Drop the signed=true line for the unsigned variant.
-ENGINE=${1:-vllm}
+ENGINE=vllm
+if [[ "${1:-}" == "vllm" || "${1:-}" == "sglang" ]]; then
+    ENGINE="$1"
+    shift
+fi
 
 ASSET_DATA_DIR="/home/shuixia/users/houguoqiang/code/datasets"
 ASSET_WEIGHTS_DIR="/home/shuixia/users/houguoqiang/code/weights"
@@ -33,6 +37,12 @@ group_size=8
 
 TRAIN_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/train.parquet"
 VAL_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/test.parquet"
+
+source "${SCRIPT_DIR}/../search/retriever/training_service.sh"
+agentopsd_search_setup "$@"
+if [[ "${RETRIEVAL_CHECK_ONLY:-0}" == "1" ]]; then
+    exit 0
+fi
 
 "$PYTHON_BIN" -m verl.trainer.main_opsd \
     algorithm.adv_estimator=grpo \
@@ -81,7 +91,8 @@ VAL_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/test.parquet"
     env.max_steps=4 \
     env.rollout.n=$group_size \
     env.history_length=4 \
-    env.search.search_url='http://0.0.0.0:8000/retrieve' \
+    env.search.search_url="$SEARCH_URL" \
+    env.search.max_concurrent_requests=8 \
     trainer.device=cuda \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
@@ -92,4 +103,4 @@ VAL_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/test.parquet"
     trainer.save_freq=-1 \
     trainer.test_freq=150 \
     trainer.total_training_steps=150 \
-    trainer.val_before_train=False $@
+    trainer.val_before_train=False "$@"
