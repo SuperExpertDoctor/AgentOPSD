@@ -35,6 +35,12 @@ train_data_size=128
 val_data_size=512
 group_size=8
 
+# Conservative memory settings below: offload optimizer state between updates
+# so it does not overlap vLLM wake-up; reduce rollout budget and micro-batches.
+# Keep the effective training batch and context lengths unchanged. CPU offload
+# trades throughput and host RAM for VRAM; shared GPUs still need free headroom.
+# Trailing Hydra overrides ("$@") can tune these defaults for dedicated GPUs.
+
 TRAIN_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/train.parquet"
 VAL_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/test.parquet"
 
@@ -60,23 +66,23 @@ fi
     actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=0.1 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=256 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=True \
-    actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=$ENGINE \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.35 \
     actor_rollout_ref.rollout.max_num_batched_tokens=4096 \
-    actor_rollout_ref.rollout.max_num_seqs=128 \
+    actor_rollout_ref.rollout.max_num_seqs=32 \
     actor_rollout_ref.rollout.enable_chunked_prefill=False \
     actor_rollout_ref.rollout.enforce_eager=True \
     actor_rollout_ref.rollout.free_cache_engine=True \
-    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.use_invalid_action_penalty=True \
     actor_rollout_ref.actor.invalid_action_penalty_coef=0.01 \
@@ -95,7 +101,7 @@ fi
     env.history_length=4 \
     env.search.search_url="$SEARCH_URL" \
     env.search.max_concurrent_requests=8 \
-    trainer.device="[1,2]" \
+    trainer.device="[4,6]" \
     trainer.critic_warmup=0 \
     trainer.logger=['console','tensorboard'] \
     trainer.project_name='verl_agent_search' \
