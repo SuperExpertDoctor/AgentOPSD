@@ -75,3 +75,27 @@ def test_alfworld_3b_skills_path_is_independent_of_launch_directory(tmp_path):
         check=True,
     )
     assert f"+algorithm.opsd.skills_dir={REPO_ROOT / 'skills/alfworld'}" in result.stdout.splitlines()
+
+
+@pytest.mark.parametrize(("script_name", "skill_name"), [
+    ("run_search_3b.sh", "search"),
+    ("run_webshop_3b.sh", "webshop"),
+])
+def test_3b_skills_path_is_independent_of_launch_directory(tmp_path, script_name, skill_name):
+    python_stub = tmp_path / "python3"
+    python_stub.write_text(
+        '#!/bin/sh\nif [ "$1" = "-m" ] && [ "$2" = "verl.trainer.main_opsd" ]; then\n'
+        '    printf "%s\\n" "$@"\nfi\n'
+    )
+    python_stub.chmod(0o755)
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"}
+    env.pop("PYTHON_BIN", None)
+    result = subprocess.run(
+        ["bash", f"agentopsd_trainer/{script_name}", "vllm"],
+        cwd=REPO_ROOT / "examples",
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert f"+algorithm.opsd.skills_dir={REPO_ROOT / 'skills' / skill_name}" in result.stdout.splitlines()

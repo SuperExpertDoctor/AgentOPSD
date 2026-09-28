@@ -83,7 +83,7 @@ fi
     +algorithm.opsd.mult_lambda=$mult_lambda \
     +algorithm.opsd.granularity=$granularity \
     +algorithm.opsd.signed=true \
-    +algorithm.opsd.skills_dir=skills/webshop \
+    +algorithm.opsd.skills_dir="${AGENTOPSD_REPO_ROOT}/skills/webshop" \
     +algorithm.opsd.skill_all=$skill_all \
     env.env_name=Webshop \
     env.seed=0 \

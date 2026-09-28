@@ -18,6 +18,8 @@ fi
 
 ASSET_DATA_DIR="/root/autodl-fs/datasets"
 ASSET_WEIGHTS_DIR="/root/autodl-fs/cache/weights"
+export ASSET_DATA_DIR ASSET_WEIGHTS_DIR
+export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-/root/autodl-fs/cache/huggingface/datasets}"
 MODEL_PATH="${ASSET_WEIGHTS_DIR}/Qwen2.5-3B-Instruct"
 
 export WANDB_API_KEY=your_key_here
@@ -95,7 +97,7 @@ fi
     +algorithm.opsd.mult_lambda=$mult_lambda \
     +algorithm.opsd.granularity=$granularity \
     +algorithm.opsd.signed=true \
-    +algorithm.opsd.skills_dir=skills/search \
+    +algorithm.opsd.skills_dir="${AGENTOPSD_REPO_ROOT}/skills/search" \
     +algorithm.opsd.skill_all=$skill_all \
     env.env_name=search \
     env.seed=0 \

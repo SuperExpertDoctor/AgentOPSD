@@ -18,6 +18,8 @@ fi
 
 ASSET_DATA_DIR="/home/shuixia/users/houguoqiang/code/datasets"
 ASSET_WEIGHTS_DIR="/home/shuixia/users/houguoqiang/code/weights"
+export ASSET_DATA_DIR ASSET_WEIGHTS_DIR
+export RETRIEVAL_PYTHON="${RETRIEVAL_PYTHON:-/home/shuixia/miniconda3/envs/llm_ft_py310/bin/python}"
 MODEL_PATH="${ASSET_WEIGHTS_DIR}/Qwen2.5-7B-Instruct"
 
 export WANDB_API_KEY=your_key_here

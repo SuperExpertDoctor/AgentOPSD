@@ -184,6 +184,14 @@ def test_search_retriever_launcher_uses_local_assets():
     source = (REPO_ROOT / "examples/search/retriever/retrieval_launch.sh").read_text()
 
     assert "$HOME/data" not in source
-    assert DATA_DIR in source
-    assert WEIGHTS_DIR in source
+    assert 'asset_data_dir="${ASSET_DATA_DIR:-/root/autodl-fs/datasets}"' in source
+    assert 'asset_weights_dir="${ASSET_WEIGHTS_DIR:-/root/autodl-fs/cache/weights}"' in source
+    for size in ("3b", "7b"):
+        launcher = (SCRIPT_DIR / f"run_search_{size}.sh").read_text()
+        assert "export ASSET_DATA_DIR ASSET_WEIGHTS_DIR" in launcher
     assert "intfloat/e5-base-v2" not in source
+
+
+def test_search_3b_keeps_retrieval_cache_off_root_overlay():
+    source = (SCRIPT_DIR / "run_search_3b.sh").read_text()
+    assert 'HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-/root/autodl-fs/cache/huggingface/datasets}"' in source

@@ -10,6 +10,60 @@ import pytest
 from examples.search.retriever import lifecycle
 
 
+def test_retrieval_assets_follow_launcher_directories(tmp_path):
+    from examples.search.retriever.startup import retrieval_assets
+
+    data_dir = tmp_path / 'datasets'
+    weights_dir = tmp_path / 'weights'
+    data, model = retrieval_assets(str(data_dir), str(weights_dir))
+    assert data == data_dir / 'searchR1'
+    assert model == weights_dir / 'e5-base-v2'
+
+
+def test_retrieval_supervisor_starts_without_registration(tmp_path):
+    import subprocess
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    pid_file = tmp_path / 'service.json'
+    result = subprocess.run(
+        [sys.executable, str(root / 'examples/search/retriever/lifecycle.py'),
+         '--owner-pid', str(os.getpid()), '--pid-file', str(pid_file), '--',
+         sys.executable, '-c', 'import time; time.sleep(.2)'],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(pid_file.read_text())['pid'] > 0
+
+
+def test_retrieval_supervisor_rejects_reused_owner_pid(tmp_path):
+    import subprocess
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    pid_file = tmp_path / 'service.json'
+    start_time = lifecycle.process_identity(os.getpid())[1]
+    result = subprocess.run(
+        [sys.executable, str(root / 'examples/search/retriever/lifecycle.py'),
+         '--owner-pid', str(os.getpid()), '--owner-start-time', str(start_time + 1),
+         '--pid-file', str(pid_file), '--', sys.executable, '-c', 'print("started")'],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 1, result.stderr
+    assert not pid_file.exists()
+
+
+def test_retrieval_startup_has_no_registration_dependency():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / 'examples/search/retriever'
+    for name in ('startup.py', 'lifecycle.py', 'retrieval_launch.sh'):
+        source = (root / name).read_text()
+        assert 'dengji.txt' not in source
+        assert 'REGISTERED' not in source
+        assert 'AGENTS.md' not in source
+
+
 def test_wait_ready_requires_matching_service_and_warmup():
     from examples.search.retriever.startup import wait_ready
     calls = []
