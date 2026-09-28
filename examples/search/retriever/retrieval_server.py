@@ -2,6 +2,13 @@ import json
 import warnings
 from typing import List, Optional
 import argparse
+import logging
+import time
+import uuid
+import faulthandler
+import signal
+import os
+from contextlib import contextmanager
 
 import faiss
 import torch
@@ -12,6 +19,21 @@ import datasets
 import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
+
+logger = logging.getLogger("retrieval")
+
+
+@contextmanager
+def timed_stage(stage, request_id="startup"):
+    started = time.monotonic()
+    logger.info("request=%s stage=%s started", request_id, stage)
+    try:
+        yield
+    except BaseException:
+        logger.exception("request=%s stage=%s failed elapsed=%.3fs", request_id, stage, time.monotonic() - started)
+        raise
+    else:
+        logger.info("request=%s stage=%s completed elapsed=%.3fs", request_id, stage, time.monotonic() - started)
 
 
 def load_corpus(corpus_path: str):
@@ -195,14 +217,16 @@ class BM25Retriever(BaseRetriever):
 class DenseRetriever(BaseRetriever):
     def __init__(self, config):
         super().__init__(config)
-        self.index = faiss.read_index(self.index_path)
+        with timed_stage("load_index"):
+            self.index = faiss.read_index(self.index_path)
         if config.faiss_gpu:
             co = faiss.GpuMultipleClonerOptions()
             co.useFloat16 = True
             co.shard = True
             self.index = faiss.index_cpu_to_all_gpus(self.index, co=co)
 
-        self.corpus = load_corpus(self.corpus_path)
+        with timed_stage("load_corpus"):
+            self.corpus = load_corpus(self.corpus_path)
         self.encoder = Encoder(
             model_name=self.retrieval_method,
             model_path=config.retrieval_model_path,
@@ -216,11 +240,15 @@ class DenseRetriever(BaseRetriever):
     def _search(self, query: str, num: int = None, return_score: bool = False):
         if num is None:
             num = self.topk
-        query_emb = self.encoder.encode(query)
-        scores, idxs = self.index.search(query_emb, k=num)
+        request_id = uuid.uuid4().hex[:12]
+        with timed_stage("encode", request_id):
+            query_emb = self.encoder.encode(query)
+        with timed_stage("index_search", request_id):
+            scores, idxs = self.index.search(query_emb, k=num)
         idxs = idxs[0]
         scores = scores[0]
-        results = load_docs(self.corpus, idxs)
+        with timed_stage("load_docs", request_id):
+            results = load_docs(self.corpus, idxs)
         if return_score:
             return results, scores
         else:
@@ -310,6 +338,12 @@ class QueryRequest(BaseModel):
 app = FastAPI()
 
 
+@app.get("/health")
+async def health_endpoint():
+    # Uvicorn starts only after the index, corpus and encoder are loaded.
+    return {"status": "ready", "pid": os.getpid()}
+
+
 @app.post("/retrieve")
 def retrieve_endpoint(request: QueryRequest):
     """
@@ -346,6 +380,10 @@ def retrieve_endpoint(request: QueryRequest):
 
 
 if __name__ == "__main__":
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    faulthandler.enable()
+    faulthandler.register(signal.SIGUSR1, all_threads=True)
 
     parser = argparse.ArgumentParser(description="Launch the local faiss retriever.")
     parser.add_argument(

@@ -1,8 +1,25 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
 set -x
+
+PYTHON_BIN="${PYTHON_BIN:-/home/shuixia/miniconda3/envs/agentopsd/bin/python}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+source "${SCRIPT_DIR}/../process_cleanup/agentopsd_process_cleanup.sh"
+agentopsd_cleanup_setup "$PYTHON_BIN"
+
 # AgentOPSD training script (paper name: AgentOPSD; internal impl name: opsd).
 # Set AGENTOPSD_METHOD_NAME to re-brand the run/experiment name in one place.
 # This is the full method (belief_mult + signed). Drop the signed=true line for the unsigned variant.
-ENGINE=${1:-vllm}
+ENGINE=vllm
+if [[ $# -gt 0 ]]; then
+    case "$1" in
+        vllm|hf)
+            ENGINE="$1"
+            shift
+            ;;
+    esac
+fi
 
 ASSET_DATA_DIR="/home/shuixia/users/houguoqiang/code/datasets"
 ASSET_WEIGHTS_DIR="/home/shuixia/users/houguoqiang/code/weights"
@@ -24,17 +41,15 @@ group_size=8
 experiment_name="${AGENTOPSD_METHOD_NAME:-AgentOPSD}_alfworld_${granularity}_lambda${mult_lambda}_skill${skill_all}"
 export ALFWORLD_DATA="${ASSET_DATA_DIR}/alfworld"
 
-export WANDB_API_KEY=your_key_here
-
 if [[ ! -f "$TRAIN_DATA" || ! -f "$VAL_DATA" ]]; then
-    python3 -m examples.data_preprocess.prepare \
+    "$PYTHON_BIN" -m examples.data_preprocess.prepare \
         --mode 'text' \
         --local_dir "${ASSET_DATA_DIR}/verl-agent" \
         --train_data_size $train_data_size \
         --val_data_size $val_data_size
 fi
 
-python3 -m verl.trainer.main_opsd \
+"$PYTHON_BIN" -m verl.trainer.main_opsd \
     algorithm.adv_estimator=grpo \
     data.train_files=$TRAIN_DATA \
     data.val_files=$VAL_DATA \
@@ -49,23 +64,25 @@ python3 -m verl.trainer.main_opsd \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=256 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=32 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.01 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
-    actor_rollout_ref.actor.fsdp_config.param_offload=False \
+    actor_rollout_ref.actor.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=32 \
-    actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=$ENGINE \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.85 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
+    actor_rollout_ref.rollout.max_num_batched_tokens=4096 \
+    actor_rollout_ref.rollout.max_num_seqs=128 \
     actor_rollout_ref.rollout.enable_chunked_prefill=False \
-    actor_rollout_ref.rollout.enforce_eager=False \
+    actor_rollout_ref.rollout.enforce_eager=True \
     actor_rollout_ref.rollout.free_cache_engine=False \
     actor_rollout_ref.rollout.val_kwargs.temperature=0.4 \
     actor_rollout_ref.rollout.val_kwargs.do_sample=True \
-    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=32 \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.use_invalid_action_penalty=True \
     actor_rollout_ref.actor.invalid_action_penalty_coef=0.1 \
@@ -82,16 +99,17 @@ python3 -m verl.trainer.main_opsd \
     env.max_steps=50 \
     env.rollout.n=$group_size \
     env.resources_per_worker.num_cpus=$num_cpus_per_env_worker \
-    trainer.device=cuda \
+    env.alfworld.actor_startup_batch_size=16 \
+    trainer.device="[2,3]" \
     trainer.critic_warmup=0 \
-    trainer.logger="['console','wandb','tensorboard']" \
+    trainer.logger="['console','tensorboard']" \
     +ray_init.runtime_env.env_vars.TENSORBOARD_DIR="/root/tf-logs/alfworld_3b/${experiment_name}" \
     trainer.project_name='verl_agent_alfworld' \
     trainer.experiment_name=$experiment_name \
-    trainer.n_gpus_per_node=8 \
     trainer.ray_wait_register_center_timeout=600 \
     trainer.nnodes=1 \
-    trainer.save_freq=-1 \
+    trainer.save_freq=50 \
+    trainer.resume_mode=auto \
     trainer.test_freq=5 \
     trainer.total_epochs=150 \
     trainer.val_before_train=True $@

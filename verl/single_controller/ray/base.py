@@ -342,6 +342,9 @@ class RayWorkerGroup(WorkerGroup):
                     "RAY_LOCAL_WORLD_SIZE": str(local_world_size),
                     "RAY_LOCAL_RANK": str(local_rank),
                 }
+                run_id = os.environ.get("AGENTOPSD_RUN_ID")
+                if run_id:
+                    env_vars["AGENTOPSD_RUN_ID"] = run_id
                 if rank != 0:
                     env_vars["MASTER_ADDR"] = self._master_addr
                     env_vars["MASTER_PORT"] = self._master_port

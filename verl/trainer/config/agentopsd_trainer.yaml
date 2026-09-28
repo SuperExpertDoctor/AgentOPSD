@@ -3,8 +3,10 @@ defaults:
   - _self_
 
 trainer:
-  # cuda selects the requested number of GPUs at random; lists select physical GPU IDs.
+  # Sole user-facing device selector: cuda uses all accessible GPUs; a list
+  # such as [1, 5] binds exactly those physical GPU IDs.
   device: [1]
+  # Internal compatibility field; configure_training_devices derives it from device.
   n_gpus_per_node: 1
   nnodes: 1
 
@@ -32,7 +34,12 @@ actor_rollout_ref:
   model:
     path: ${local_assets.model_path}
   rollout:
-    gpu_memory_utilization: 0.85
+    # Keep vLLM's profiling budget positive for the 3B SPMD rollout while
+    # leaving headroom for FSDP parameter swaps and log-prob computation.
+    gpu_memory_utilization: 0.5
+    max_num_batched_tokens: 4096
+    max_num_seqs: 128
+    enforce_eager: true
 
 critic:
   model:
@@ -47,6 +54,7 @@ reward_model:
 env:
   alfworld:
     data_dir: ${local_assets.alfworld_dir}
+    actor_startup_batch_size: 16
   search:
     index_path: ${local_assets.search_index}
     corpus_path: ${local_assets.search_corpus}

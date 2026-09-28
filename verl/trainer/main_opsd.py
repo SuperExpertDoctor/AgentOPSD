@@ -4,12 +4,14 @@ Assignment) training. Based on main_rlsd.py with OPSD-specific extensions.
 """
 
 import os
+import sys
 
 import hydra
 import ray
 from omegaconf import OmegaConf
 
-from verl.trainer.device_utils import configure_training_devices
+from verl.trainer.device_utils import configure_training_devices, validate_tensor_parallel_size
+from verl.trainer.agentopsd_cleanup import RUN_ID_ENV, cleanup_runtime_resources
 
 
 @hydra.main(config_path="config", config_name="agentopsd_trainer", version_base=None)
@@ -18,43 +20,89 @@ def main(config):
 
 
 def run_opsd(config) -> None:
-    device_selection = configure_training_devices(config.trainer)
-    print(
-        "[device] backend={} selected_gpu_ids={} n_gpus_per_node={} nnodes={}".format(
-            device_selection.device_name,
-            device_selection.device_ids,
-            device_selection.n_gpus_per_node,
-            device_selection.nnodes,
+    runner = None
+    ray_started_here = False
+    os.environ.setdefault(RUN_ID_ENV, f"agentopsd-{os.getpid()}")
+    try:
+        device_selection = configure_training_devices(config.trainer)
+        validate_tensor_parallel_size(
+            device_selection,
+            config.actor_rollout_ref.rollout.tensor_model_parallel_size,
         )
-    )
-
-    local_assets = config.get("local_assets")
-    if local_assets is not None:
-        alfworld_dir = local_assets.get("alfworld_dir")
-        if alfworld_dir:
-            os.environ["ALFWORLD_DATA"] = os.path.abspath(
-                os.path.expanduser(os.path.expandvars(str(alfworld_dir)))
+        print(
+            "[device] backend={} requested={} resolved_physical_gpu_ids={} "
+            "n_gpus_per_node={} nnodes={}".format(
+                device_selection.device_name,
+                device_selection.requested_device,
+                device_selection.device_ids,
+                device_selection.n_gpus_per_node,
+                device_selection.nnodes,
             )
+        )
 
-    if not ray.is_initialized():
-        from verl.trainer.constants_ppo import get_ppo_ray_runtime_env
+        local_assets = config.get("local_assets")
+        if local_assets is not None:
+            alfworld_dir = local_assets.get("alfworld_dir")
+            if alfworld_dir:
+                os.environ["ALFWORLD_DATA"] = os.path.abspath(
+                    os.path.expanduser(os.path.expandvars(str(alfworld_dir)))
+                )
 
-        default_runtime_env = get_ppo_ray_runtime_env()
-        ray_init_kwargs = config.get("ray_init", {})
-        runtime_env_kwargs = ray_init_kwargs.get("runtime_env", {})
+        if not ray.is_initialized():
+            from verl.trainer.constants_ppo import get_ppo_ray_runtime_env
 
-        runtime_env = OmegaConf.merge(default_runtime_env, runtime_env_kwargs)
-        ray_init_kwargs = OmegaConf.create({**ray_init_kwargs, "runtime_env": runtime_env})
-        print(f"ray init kwargs: {ray_init_kwargs}")
-        ray.init(**OmegaConf.to_container(ray_init_kwargs))
+            default_runtime_env = get_ppo_ray_runtime_env()
+            ray_init_kwargs = config.get("ray_init", {})
+            runtime_env_kwargs = ray_init_kwargs.get("runtime_env", {})
 
-    runner = OPSDTaskRunner.remote()
-    ray.get(runner.run.remote(config))
+            runtime_env = OmegaConf.merge(default_runtime_env, runtime_env_kwargs)
+            runtime_env = OmegaConf.to_container(runtime_env, resolve=True)
+            runtime_env.setdefault("env_vars", {})[RUN_ID_ENV] = os.environ[RUN_ID_ENV]
+            ray_init_kwargs = OmegaConf.to_container(
+                OmegaConf.create({**ray_init_kwargs, "runtime_env": runtime_env}),
+                resolve=True,
+            )
+            print(f"ray init kwargs: {ray_init_kwargs}")
+            ray_started_here = True
+            ray.init(**ray_init_kwargs)
+
+        runner = OPSDTaskRunner.remote()
+        ray.get(runner.run.remote(config))
+    finally:
+        if runner is not None:
+            try:
+                ray.kill(runner, no_restart=True)
+            except TypeError:
+                try:
+                    ray.kill(runner)
+                except Exception as exc:
+                    print(f"[cleanup] runner kill failed: {exc}", file=sys.stderr, flush=True)
+            except Exception as exc:
+                print(f"[cleanup] runner kill failed: {exc}", file=sys.stderr, flush=True)
+        if ray_started_here:
+            try:
+                if ray.is_initialized():
+                    ray.shutdown()
+            except Exception as exc:
+                print(f"[cleanup] Ray shutdown failed: {exc}", file=sys.stderr, flush=True)
 
 
 @ray.remote(num_cpus=1)
 class OPSDTaskRunner:
     def run(self, config):
+        resources = {"trainer": None, "envs": None, "val_envs": None}
+        try:
+            return self._run(config, resources)
+        finally:
+            cleanup_errors = cleanup_runtime_resources(
+                trainer=resources["trainer"],
+                envs=(resources["envs"], resources["val_envs"]),
+                ray_module=ray,
+            )
+            for error in cleanup_errors:
+                print(f"[cleanup] {error}", file=sys.stderr, flush=True)
+
+    def _run(self, config, resources):
         from pprint import pprint
 
         from omegaconf import OmegaConf
@@ -70,10 +118,6 @@ class OPSDTaskRunner:
             config.actor_rollout_ref.model.path,
             use_shm=config.actor_rollout_ref.model.get("use_shm", False),
         )
-
-        from agent_system.environments import make_envs
-
-        envs, val_envs = make_envs(config)
 
         from verl.utils import hf_processor, hf_tokenizer
 
@@ -197,11 +241,24 @@ class OPSDTaskRunner:
             train_sampler=train_sampler,
             device_name=config.trainer.device,
             traj_collector=traj_collector,
-            envs=envs,
-            val_envs=val_envs,
+            envs=None,
+            val_envs=None,
             skill_provider=skill_provider,
         )
+        resources["trainer"] = trainer
+
+        # Reserve and initialize the GPU workers before starting the many
+        # CPU-backed ALFWorld actors. This avoids delaying Ray's register
+        # center while hundreds of environment processes are importing data.
         trainer.init_workers()
+
+        from agent_system.environments import make_envs
+
+        envs, val_envs = make_envs(config)
+        resources["envs"] = envs
+        resources["val_envs"] = val_envs
+        trainer.envs = envs
+        trainer.val_envs = val_envs
         trainer.fit()
 
 

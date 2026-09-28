@@ -61,6 +61,10 @@ class AlfworldWorker:
     def __init__(self, config, seed, base_env):
         self.env = base_env.init_env(batch_size=1)  # Each worker holds only one sub-environment
         self.env.seed(seed)
+
+    def ready(self):
+        """Return only after the environment has finished initializing."""
+        return True
     
     def step(self, action):
         """Execute a step in the environment"""
@@ -82,8 +86,64 @@ class AlfworldWorker:
         image = image.cpu()  
         return image
 
+    def close(self):
+        """Close the environment held by this actor."""
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+        close = getattr(self.env, "close", None)
+        if callable(close):
+            close()
+
+
+def _create_ready_workers(
+    env_worker,
+    config,
+    seed,
+    base_env,
+    num_processes,
+    group_n,
+    startup_batch_size,
+):
+    """Create environment actors in bounded batches and wait for each batch."""
+    if startup_batch_size is None:
+        startup_batch_size = 16
+    if not isinstance(startup_batch_size, int) or startup_batch_size < 1:
+        raise ValueError("startup_batch_size must be a positive integer")
+
+    workers = []
+    for batch_start in range(0, num_processes, startup_batch_size):
+        batch_end = min(batch_start + startup_batch_size, num_processes)
+        batch = [
+            env_worker.remote(config, seed + (i // group_n), base_env)
+            for i in range(batch_start, batch_end)
+        ]
+        try:
+            ray.get([worker.ready.remote() for worker in batch])
+        except Exception:
+            for worker in workers + batch:
+                try:
+                    ray.kill(worker)
+                except Exception:
+                    # Preserve the actor startup error if Ray is already down.
+                    pass
+            raise
+        workers.extend(batch)
+    return workers
+
+
 class AlfworldEnvs(gym.Env):
-    def __init__(self, alf_config_path, seed, env_num, group_n, resources_per_worker, is_train=True, env_kwargs={}):
+    def __init__(
+        self,
+        alf_config_path,
+        seed,
+        env_num,
+        group_n,
+        resources_per_worker,
+        is_train=True,
+        env_kwargs={},
+        startup_batch_size=16,
+    ):
         super().__init__()
         
         # Initialize Ray if not already initialized
@@ -97,13 +157,30 @@ class AlfworldEnvs(gym.Env):
         self.multi_modal = (env_type == 'AlfredThorEnv')
         self.num_processes = env_num * group_n
         self.group_n = group_n
-
-        # Create Ray remote actors instead of processes
-        env_worker = ray.remote(**resources_per_worker)(AlfworldWorker)
         self.workers = []
-        for i in range(self.num_processes):
-            worker = env_worker.remote(config, seed + (i // self.group_n), base_env)
-            self.workers.append(worker)
+        self._closed = False
+
+        # Create Ray remote actors instead of processes. Wait for each bounded
+        # batch so a large train/validation rollout does not fork every worker
+        # and import ALFWorld at the same time.
+        worker_options = dict(resources_per_worker)
+        run_id = os.environ.get("AGENTOPSD_RUN_ID")
+        if run_id:
+            runtime_env = dict(worker_options.get("runtime_env") or {})
+            env_vars = dict(runtime_env.get("env_vars") or {})
+            env_vars["AGENTOPSD_RUN_ID"] = run_id
+            runtime_env["env_vars"] = env_vars
+            worker_options["runtime_env"] = runtime_env
+        env_worker = ray.remote(**worker_options)(AlfworldWorker)
+        self.workers = _create_ready_workers(
+            env_worker,
+            config,
+            seed,
+            base_env,
+            self.num_processes,
+            self.group_n,
+            startup_batch_size,
+        )
 
         self.prev_admissible_commands = [None for _ in range(self.num_processes)]
 
@@ -195,12 +272,54 @@ class AlfworldEnvs(gym.Env):
         return self.prev_admissible_commands
 
     def close(self):
-        """
-        Close all workers
-        """
-        # Kill all Ray actors
-        for worker in self.workers:
-            ray.kill(worker)
+        """Close and kill all environment actors; safe to call repeatedly."""
+        if self._closed:
+            return
 
-def build_alfworld_envs(alf_config_path, seed, env_num, group_n, resources_per_worker, is_train=True, env_kwargs={}):
-    return AlfworldEnvs(alf_config_path, seed, env_num, group_n, resources_per_worker, is_train, env_kwargs)
+        workers = list(self.workers)
+        close_futures = []
+        for worker in workers:
+            try:
+                close_futures.append(worker.close.remote())
+            except Exception:
+                # The actor may already have died; force-kill below is still
+                # required to release its Ray resources.
+                pass
+        if close_futures:
+            try:
+                ray.get(close_futures, timeout=5)
+            except Exception:
+                pass
+        for worker in workers:
+            try:
+                ray.kill(worker, no_restart=True)
+            except TypeError:
+                try:
+                    ray.kill(worker)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        self.workers = []
+        self._closed = True
+
+def build_alfworld_envs(
+    alf_config_path,
+    seed,
+    env_num,
+    group_n,
+    resources_per_worker,
+    is_train=True,
+    env_kwargs={},
+    startup_batch_size=16,
+):
+    return AlfworldEnvs(
+        alf_config_path,
+        seed,
+        env_num,
+        group_n,
+        resources_per_worker,
+        is_train,
+        env_kwargs,
+        startup_batch_size,
+    )

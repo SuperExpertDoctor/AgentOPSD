@@ -303,6 +303,7 @@ env:
     eval_dataset: eval_in_distribution
   search:
     log_requests: false
+    max_concurrent_requests: 256 # Per search environment instance, shared across its URLs.
     search_url: "http://127.0.0.1:8000/retrieve" # also support multiple urls: ["http://127.0.0.1:8000/retrieve", "http://127.0.0.1:8001/retrieve"]
     topk: 3
     timeout: 60

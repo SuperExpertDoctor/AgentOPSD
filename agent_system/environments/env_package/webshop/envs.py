@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+
 import ray
 import gym
 import numpy as np
@@ -77,6 +79,9 @@ class WebshopWorker:
     
     def close(self):
         """Close the environment"""
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
         self.env.close()
 
 
@@ -117,15 +122,29 @@ class WebshopMultiProcessEnv(gym.Env):
         self._env_kwargs = env_kwargs if env_kwargs is not None else {'observation_mode': 'text', 'num_products': None}
 
         # -------------------------- Ray actors setup --------------------------
-        env_worker = ray.remote(**resources_per_worker)(WebshopWorker)
         self._workers = []
-        for i in range(self.num_processes):
-            worker = env_worker.remote(seed + (i // self.group_n), self._env_kwargs)
-            self._workers.append(worker)
+        self._closed = False
+        worker_options = dict(resources_per_worker)
+        run_id = os.environ.get("AGENTOPSD_RUN_ID")
+        if run_id:
+            runtime_env = dict(worker_options.get("runtime_env") or {})
+            env_vars = dict(runtime_env.get("env_vars") or {})
+            env_vars["AGENTOPSD_RUN_ID"] = run_id
+            runtime_env["env_vars"] = env_vars
+            worker_options["runtime_env"] = runtime_env
 
-        # Get goals from the first worker
-        goals_future = self._workers[0].get_goals.remote()
-        goals = ray.get(goals_future)
+        try:
+            env_worker = ray.remote(**worker_options)(WebshopWorker)
+            for i in range(self.num_processes):
+                worker = env_worker.remote(seed + (i // self.group_n), self._env_kwargs)
+                self._workers.append(worker)
+
+            # Get goals from the first worker
+            goals_future = self._workers[0].get_goals.remote()
+            goals = ray.get(goals_future)
+        except Exception:
+            self.close()
+            raise
 
         # ------- original ----------#
         # if args.num is None:
@@ -215,23 +234,39 @@ class WebshopMultiProcessEnv(gym.Env):
         if getattr(self, '_closed', False):
             return
 
-        # Close all workers and kill Ray actors
+        workers = list(getattr(self, "_workers", ()))
         close_futures = []
-        for worker in self._workers:
-            future = worker.close.remote()
-            close_futures.append(future)
-        
-        # Wait for all workers to close
-        ray.get(close_futures)
-        
-        # Kill all Ray actors
-        for worker in self._workers:
-            ray.kill(worker)
-            
+        for worker in workers:
+            try:
+                close_futures.append(worker.close.remote())
+            except Exception:
+                pass
+
+        if close_futures:
+            try:
+                ray.get(close_futures, timeout=5)
+            except Exception:
+                pass
+
+        for worker in workers:
+            try:
+                ray.kill(worker, no_restart=True)
+            except TypeError:
+                try:
+                    ray.kill(worker)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        self._workers = []
         self._closed = True
 
     def __del__(self):  # noqa: D401
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 # -----------------------------------------------------------------------------

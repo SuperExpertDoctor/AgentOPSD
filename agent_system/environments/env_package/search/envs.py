@@ -66,7 +66,10 @@ class SearchMultiProcessEnv(gym.Env):
             cfg_i.search_url = search_urls[idx % n_clients]
             self.envs.append(SearchEnv(cfg_i))
 
-        max_workers = min(self.batch_size, 256)
+        max_concurrent_requests = search_cfg.get("max_concurrent_requests", 256)
+        if isinstance(max_concurrent_requests, bool) or not isinstance(max_concurrent_requests, int) or max_concurrent_requests < 1:
+            raise ValueError("env.search.max_concurrent_requests must be a positive integer")
+        max_workers = min(self.batch_size, max_concurrent_requests)
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
 
         self._loop = asyncio.new_event_loop()

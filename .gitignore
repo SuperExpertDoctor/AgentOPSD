@@ -132,3 +132,6 @@ data/
 .tmp
 *ports
 
+.worktrees/
+
+tensorboard_log/

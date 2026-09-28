@@ -1,4 +1,12 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
 set -x
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+source "${SCRIPT_DIR}/../process_cleanup/agentopsd_process_cleanup.sh"
+agentopsd_cleanup_setup "$PYTHON_BIN"
 # AgentOPSD training script (paper name: AgentOPSD; internal impl name: opsd).
 # Set AGENTOPSD_METHOD_NAME to re-brand the run/experiment name in one place.
 # This is the full method (belief_mult + signed). Drop the signed=true line for the unsigned variant.
@@ -27,14 +35,14 @@ export ALFWORLD_DATA="${ASSET_DATA_DIR}/alfworld"
 export WANDB_API_KEY=your_key_here
 
 if [[ ! -f "$TRAIN_DATA" || ! -f "$VAL_DATA" ]]; then
-    python3 -m examples.data_preprocess.prepare \
+    "$PYTHON_BIN" -m examples.data_preprocess.prepare \
         --mode 'text' \
         --local_dir "${ASSET_DATA_DIR}/verl-agent" \
         --train_data_size $train_data_size \
         --val_data_size $val_data_size
 fi
 
-python3 -m verl.trainer.main_opsd \
+"$PYTHON_BIN" -m verl.trainer.main_opsd \
     algorithm.adv_estimator=grpo \
     data.train_files=$TRAIN_DATA \
     data.val_files=$VAL_DATA \
@@ -88,7 +96,6 @@ python3 -m verl.trainer.main_opsd \
     +ray_init.runtime_env.env_vars.TENSORBOARD_DIR="/root/tf-logs/alfworld_7b/${experiment_name}" \
     trainer.project_name='verl_agent_alfworld' \
     trainer.experiment_name=$experiment_name \
-    trainer.n_gpus_per_node=8 \
     trainer.ray_wait_register_center_timeout=600 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \

@@ -3,13 +3,17 @@
 set -euo pipefail
 set -x
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+source "${SCRIPT_DIR}/../process_cleanup/agentopsd_process_cleanup.sh"
+agentopsd_cleanup_setup "$PYTHON_BIN"
+
 # Single-GPU AgentOPSD run; the physical GPU is controlled by trainer.device in the config.
 # The default HF rollout reuses the FSDP model and avoids loading a second
 # inference engine. Set ENGINE=vllm only when the GPU has enough free memory.
 export ALFWORLD_DATA="/home/shuixia/users/houguoqiang/code/datasets/alfworld"
 
 ENGINE="${ENGINE:-hf}"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 ASSET_DATA_DIR="/home/shuixia/users/houguoqiang/code/datasets"
 ASSET_WEIGHTS_DIR="/home/shuixia/users/houguoqiang/code/weights"
@@ -97,7 +101,6 @@ fi
     env.rollout.n="$group_size" \
     env.resources_per_worker.num_cpus="$num_cpus_per_env_worker" \
     trainer.device="[1]" \
-    trainer.n_gpus_per_node=1 \
     trainer.nnodes=1 \
     trainer.critic_warmup=0 \
     trainer.logger="['console','tensorboard']" \

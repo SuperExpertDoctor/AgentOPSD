@@ -1,8 +1,20 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
 set -x
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+source "${SCRIPT_DIR}/../process_cleanup/agentopsd_process_cleanup.sh"
+agentopsd_cleanup_setup "$PYTHON_BIN"
 # AgentOPSD training script (paper name: AgentOPSD; internal impl name: opsd).
 # Set AGENTOPSD_METHOD_NAME to re-brand the run/experiment name in one place.
 # This is the full method (belief_mult + signed). Drop the signed=true line for the unsigned variant.
-ENGINE=${1:-vllm}
+ENGINE=vllm
+if [[ "${1:-}" == "vllm" || "${1:-}" == "sglang" ]]; then
+    ENGINE="$1"
+    shift
+fi
 
 ASSET_DATA_DIR="/home/shuixia/users/houguoqiang/code/datasets"
 ASSET_WEIGHTS_DIR="/home/shuixia/users/houguoqiang/code/weights"
@@ -26,7 +38,13 @@ group_size=8
 TRAIN_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/train.parquet"
 VAL_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/test.parquet"
 
-python3 -m verl.trainer.main_opsd \
+source "${SCRIPT_DIR}/../search/retriever/training_service.sh"
+agentopsd_search_setup "$@"
+if [[ "${RETRIEVAL_CHECK_ONLY:-0}" == "1" ]]; then
+    exit 0
+fi
+
+"$PYTHON_BIN" -m verl.trainer.main_opsd \
     algorithm.adv_estimator=grpo \
     data.train_files=$TRAIN_DATA \
     data.val_files=$VAL_DATA \
@@ -73,17 +91,17 @@ python3 -m verl.trainer.main_opsd \
     env.max_steps=4 \
     env.rollout.n=$group_size \
     env.history_length=4 \
-    env.search.search_url='http://0.0.0.0:8000/retrieve' \
+    env.search.search_url="$SEARCH_URL" \
+    env.search.max_concurrent_requests=8 \
     trainer.device=cuda \
     trainer.critic_warmup=0 \
     trainer.logger="['console','wandb','tensorboard']" \
     +ray_init.runtime_env.env_vars.TENSORBOARD_DIR="/root/tf-logs/search_7b/${experiment_name}" \
     trainer.project_name='verl_agent_search' \
     trainer.experiment_name=$experiment_name \
-    trainer.n_gpus_per_node=4 \
     trainer.ray_wait_register_center_timeout=600 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
     trainer.test_freq=150 \
     trainer.total_training_steps=150 \
-    trainer.val_before_train=False $@
+    trainer.val_before_train=False "$@"

@@ -314,6 +314,12 @@ class ActorRolloutRefWorker(Worker):
         fsdp_mesh = self.device_mesh
         sharding_strategy = get_sharding_strategy(fsdp_mesh)
 
+        # Tied Qwen checkpoints are loaded from the same CPU checkpoint on
+        # every rank, so broadcasting the full module during FSDP wrapping is
+        # redundant and creates a temporary GPU memory peak. Models using
+        # meta initialization still need rank-0 synchronization.
+        sync_module_states = not bool(getattr(actor_model_config, "tie_word_embeddings", False))
+
         # TODO: add transformer policy
         # We force reference policy to use CPUOffload to save memory.
         # We force turn off CPUOffload for actor because it causes incorrect results when using grad accumulation
@@ -345,7 +351,7 @@ class ActorRolloutRefWorker(Worker):
                 device_id=get_torch_device().current_device(),
                 sharding_strategy=sharding_strategy,  # zero3
                 mixed_precision=mixed_precision,
-                sync_module_states=True,
+                sync_module_states=sync_module_states,
                 device_mesh=self.device_mesh,
                 forward_prefetch=False,
             )

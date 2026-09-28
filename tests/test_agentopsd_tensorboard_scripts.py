@@ -13,10 +13,10 @@ SCRIPT_DIR = REPO_ROOT / "examples/agentopsd_trainer"
 @pytest.mark.parametrize(
     ("script_name", "log_group", "experiment", "expected_backends"),
     [
-        ("run_alfworld_3b.sh", "alfworld_3b", "AgentOPSD_alfworld_turn_lambda0.5_skillfalse", ["console", "wandb", "tensorboard"]),
+        ("run_alfworld_3b.sh", "alfworld_3b", "AgentOPSD_alfworld_turn_lambda0.5_skillfalse", ["console", "tensorboard"]),
         ("run_alfworld_7b.sh", "alfworld_7b", "AgentOPSD_alfworld_turn_lambda0.5_skillfalse", ["console", "wandb", "tensorboard"]),
         ("run_alfworld_7b_gpu1.sh", "alfworld_7b", "AgentOPSD_alfworld_gpu1_turn_lora16", ["console", "tensorboard"]),
-        ("run_search_3b.sh", "search_3b", "AgentOPSD_search_token_lambda0.5_skillfalse", ["console", "wandb", "tensorboard"]),
+        ("run_search_3b.sh", "search_3b", "AgentOPSD_search_token_lambda0.5_skillfalse", ["console", "tensorboard"]),
         ("run_search_7b.sh", "search_7b", "AgentOPSD_search_token_lambda0.5_skillfalse", ["console", "wandb", "tensorboard"]),
         ("run_webshop_3b.sh", "webshop_3b", "AgentOPSD_webshop_token_lambda0.5_skillfalse", ["console", "wandb", "tensorboard"]),
         ("run_webshop_7b.sh", "webshop_7b", "AgentOPSD_webshop_token_lambda0.5_skillfalse", ["console", "wandb", "tensorboard"]),
