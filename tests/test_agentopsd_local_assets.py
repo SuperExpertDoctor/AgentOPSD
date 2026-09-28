@@ -8,6 +8,8 @@ CONFIG_PATH = REPO_ROOT / "verl/trainer/config/agentopsd_trainer.yaml"
 SCRIPT_DIR = REPO_ROOT / "examples/agentopsd_trainer"
 DATA_DIR = "/home/shuixia/users/houguoqiang/code/datasets"
 WEIGHTS_DIR = "/home/shuixia/users/houguoqiang/code/weights"
+LOCAL_DATA_DIR = "/root/autodl-fs/datasets"
+LOCAL_WEIGHTS_DIR = "/root/autodl-fs/cache/weights"
 
 
 def test_agentopsd_hydra_config_resolves_local_asset_paths():
@@ -137,8 +139,12 @@ def test_agentopsd_scripts_use_local_models_and_datasets():
         source = script.read_text()
         assert "$HOME/data" not in source
         assert "Qwen/Qwen2.5" not in source
-        assert DATA_DIR in source
-        assert WEIGHTS_DIR in source
+        if script.name.endswith("_3b.sh"):
+            assert LOCAL_DATA_DIR in source
+            assert LOCAL_WEIGHTS_DIR in source
+        else:
+            assert DATA_DIR in source
+            assert WEIGHTS_DIR in source
         assert "../process_cleanup/agentopsd_process_cleanup.sh" in source
         assert "agentopsd_cleanup_setup" in source
         assert "verl.trainer.agentopsd_cleanup preflight" not in source
@@ -146,8 +152,8 @@ def test_agentopsd_scripts_use_local_models_and_datasets():
         if script.name == "run_alfworld_7b_gpu1.sh":
             assert 'trainer.device="[1]"' in source
         elif script.name == "run_alfworld_3b.sh":
-            assert 'PYTHON_BIN="${PYTHON_BIN:-/home/shuixia/miniconda3/envs/agentopsd/bin/python}"' in source
-            assert 'trainer.device="[2,3]"' in source
+            assert 'PYTHON_BIN="${PYTHON_BIN:-python3}"' in source
+            assert 'trainer.device="[0,1]"' in source
             assert "actor_rollout_ref.rollout.tensor_model_parallel_size=1" in source
             assert "actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8" in source
             assert "actor_rollout_ref.actor.fsdp_config.param_offload=True" in source
@@ -159,14 +165,18 @@ def test_agentopsd_scripts_use_local_models_and_datasets():
             assert "trainer.logger=\"['console','tensorboard']\"" in source
             assert "WANDB_API_KEY=your_key_here" not in source
         elif script.name == "run_search_3b.sh":
-            assert 'trainer.device="[4,6]"' in source
+            assert 'trainer.device="[0,1]"' in source
+        elif script.name == "run_webshop_3b.sh":
+            assert 'trainer.device="[0,1]"' in source
+            assert "actor_rollout_ref.rollout.gpu_memory_utilization=0.5" in source
+            assert "WANDB_API_KEY=your_key_here" not in source
         else:
             assert "trainer.device=cuda" in source
         assert "trainer.n_gpus_per_node" not in source
         assert "$@" in source
         if script.name == "run_search_3b.sh":
             assert "actor_rollout_ref.rollout.gpu_memory_utilization=0.35" in source
-        elif script.name != "run_alfworld_3b.sh":
+        elif script.name.endswith("_7b.sh"):
             assert "actor_rollout_ref.rollout.gpu_memory_utilization=0.85" in source
 
 

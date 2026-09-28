@@ -16,8 +16,8 @@ if [[ "${1:-}" == "vllm" || "${1:-}" == "sglang" ]]; then
     shift
 fi
 
-ASSET_DATA_DIR="/home/shuixia/users/houguoqiang/code/datasets"
-ASSET_WEIGHTS_DIR="/home/shuixia/users/houguoqiang/code/weights"
+ASSET_DATA_DIR="/root/autodl-fs/datasets"
+ASSET_WEIGHTS_DIR="/root/autodl-fs/cache/weights"
 MODEL_PATH="${ASSET_WEIGHTS_DIR}/Qwen2.5-3B-Instruct"
 
 export WANDB_API_KEY=your_key_here
@@ -44,6 +44,7 @@ group_size=8
 TRAIN_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/train.parquet"
 VAL_DATA="${ASSET_DATA_DIR}/searchR1_processed_direct/test.parquet"
 
+export RETRIEVAL_GPU_ID="${RETRIEVAL_GPU_ID:-1}"
 source "${SCRIPT_DIR}/../search/retriever/training_service.sh"
 agentopsd_search_setup "$@"
 if [[ "${RETRIEVAL_CHECK_ONLY:-0}" == "1" ]]; then
@@ -61,6 +62,8 @@ fi
     data.filter_overlong_prompts=True \
     data.truncation='left' \
     data.return_raw_chat=True \
+    local_assets.data_dir=$ASSET_DATA_DIR \
+    local_assets.weights_dir=$ASSET_WEIGHTS_DIR \
     local_assets.model_path=$MODEL_PATH \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=0.1 \
@@ -101,7 +104,8 @@ fi
     env.history_length=4 \
     env.search.search_url="$SEARCH_URL" \
     env.search.max_concurrent_requests=8 \
-    trainer.device="[4,6]" \
+    trainer.device="[0,1]" \
+    ray_init.num_cpus=16 \
     trainer.critic_warmup=0 \
     trainer.logger="['console','tensorboard']" \
     +ray_init.runtime_env.env_vars.TENSORBOARD_DIR="/root/tf-logs/search_3b/${experiment_name}" \

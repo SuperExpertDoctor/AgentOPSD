@@ -3,7 +3,7 @@
 set -euo pipefail
 set -x
 
-PYTHON_BIN="${PYTHON_BIN:-/home/shuixia/miniconda3/envs/agentopsd/bin/python}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "${SCRIPT_DIR}/../process_cleanup/agentopsd_process_cleanup.sh"
 agentopsd_cleanup_setup "$PYTHON_BIN"
@@ -21,8 +21,8 @@ if [[ $# -gt 0 ]]; then
     esac
 fi
 
-ASSET_DATA_DIR="/home/shuixia/users/houguoqiang/code/datasets"
-ASSET_WEIGHTS_DIR="/home/shuixia/users/houguoqiang/code/weights"
+ASSET_DATA_DIR="/root/autodl-fs/datasets"
+ASSET_WEIGHTS_DIR="/root/autodl-fs/cache/weights"
 MODEL_PATH="${ASSET_WEIGHTS_DIR}/Qwen2.5-3B-Instruct"
 TRAIN_DATA="${ASSET_DATA_DIR}/verl-agent/text/train.parquet"
 VAL_DATA="${ASSET_DATA_DIR}/verl-agent/text/test.parquet"
@@ -60,6 +60,8 @@ fi
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.return_raw_chat=True \
+    local_assets.data_dir=$ASSET_DATA_DIR \
+    local_assets.weights_dir=$ASSET_WEIGHTS_DIR \
     local_assets.model_path=$MODEL_PATH \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
@@ -92,7 +94,7 @@ fi
     +algorithm.opsd.mult_lambda=$mult_lambda \
     +algorithm.opsd.granularity=$granularity \
     +algorithm.opsd.signed=true \
-    +algorithm.opsd.skills_dir=skills/alfworld \
+    +algorithm.opsd.skills_dir="${AGENTOPSD_REPO_ROOT}/skills/alfworld" \
     +algorithm.opsd.skill_all=$skill_all \
     env.env_name=alfworld/AlfredTWEnv \
     env.seed=0 \
@@ -100,7 +102,8 @@ fi
     env.rollout.n=$group_size \
     env.resources_per_worker.num_cpus=$num_cpus_per_env_worker \
     env.alfworld.actor_startup_batch_size=16 \
-    trainer.device="[2,3]" \
+    trainer.device="[0,1]" \
+    ray_init.num_cpus=16 \
     trainer.critic_warmup=0 \
     trainer.logger="['console','tensorboard']" \
     +ray_init.runtime_env.env_vars.TENSORBOARD_DIR="/root/tf-logs/alfworld_3b/${experiment_name}" \

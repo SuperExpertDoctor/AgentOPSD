@@ -14,8 +14,8 @@ agentopsd_cleanup_setup "$PYTHON_BIN"
 
 ENGINE=${1:-vllm}
 
-ASSET_DATA_DIR="/home/shuixia/users/houguoqiang/code/datasets"
-ASSET_WEIGHTS_DIR="/home/shuixia/users/houguoqiang/code/weights"
+ASSET_DATA_DIR="/root/autodl-fs/datasets"
+ASSET_WEIGHTS_DIR="/root/autodl-fs/cache/weights"
 MODEL_PATH="${ASSET_WEIGHTS_DIR}/Qwen2.5-3B-Instruct"
 TRAIN_DATA="${ASSET_DATA_DIR}/verl-agent/text/train.parquet"
 VAL_DATA="${ASSET_DATA_DIR}/verl-agent/text/test.parquet"
@@ -32,8 +32,6 @@ train_data_size=16
 val_data_size=128
 group_size=8
 experiment_name="${AGENTOPSD_METHOD_NAME:-AgentOPSD}_webshop_${granularity}_lambda${mult_lambda}_skill${skill_all}"
-export WANDB_API_KEY=your_key_here
-
 if [[ ! -f "$TRAIN_DATA" || ! -f "$VAL_DATA" ]]; then
     "$PYTHON_BIN" -m examples.data_preprocess.prepare \
         --mode 'text' \
@@ -53,6 +51,8 @@ fi
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.return_raw_chat=True \
+    local_assets.data_dir=$ASSET_DATA_DIR \
+    local_assets.weights_dir=$ASSET_WEIGHTS_DIR \
     local_assets.model_path=$MODEL_PATH \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
@@ -67,7 +67,7 @@ fi
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=16 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
     actor_rollout_ref.rollout.name=$ENGINE \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.85 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
     actor_rollout_ref.rollout.enable_chunked_prefill=False \
     actor_rollout_ref.rollout.enforce_eager=False \
     actor_rollout_ref.rollout.free_cache_engine=False \
@@ -90,9 +90,10 @@ fi
     env.max_steps=15 \
     env.rollout.n=$group_size \
     env.resources_per_worker.num_cpus=$num_cpus_per_env_worker \
-    trainer.device=cuda \
+    trainer.device="[0,1]" \
+    ray_init.num_cpus=16 \
     trainer.critic_warmup=0 \
-    trainer.logger="['console','wandb','tensorboard']" \
+    trainer.logger="['console','tensorboard']" \
     +ray_init.runtime_env.env_vars.TENSORBOARD_DIR="/root/tf-logs/webshop_3b/${experiment_name}" \
     trainer.project_name='verl_agent_webshopv1' \
     trainer.experiment_name=$experiment_name \
