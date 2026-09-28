@@ -15,7 +15,7 @@ pylatexenc
 pre-commit
 ray[default]
 tensorboard
-tensordict<=0.6.2
+tensordict<=0.14.2
 torchdata
 transformers==4.51.1
 # vllm==0.8.4
