@@ -100,7 +100,8 @@ fi
     trainer.n_gpus_per_node=1 \
     trainer.nnodes=1 \
     trainer.critic_warmup=0 \
-    trainer.logger="['console']" \
+    trainer.logger="['console','tensorboard']" \
+    +ray_init.runtime_env.env_vars.TENSORBOARD_DIR="/root/tf-logs/alfworld_7b/${experiment_name}" \
     trainer.project_name=verl_agent_alfworld \
     trainer.experiment_name="$experiment_name" \
     trainer.ray_wait_register_center_timeout=600 \

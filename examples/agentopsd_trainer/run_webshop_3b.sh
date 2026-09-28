@@ -84,7 +84,8 @@ python3 -m verl.trainer.main_opsd \
     env.resources_per_worker.num_cpus=$num_cpus_per_env_worker \
     trainer.device=cuda \
     trainer.critic_warmup=0 \
-    trainer.logger=['console','wandb'] \
+    trainer.logger="['console','wandb','tensorboard']" \
+    +ray_init.runtime_env.env_vars.TENSORBOARD_DIR="/root/tf-logs/webshop_3b/${experiment_name}" \
     trainer.project_name='verl_agent_webshopv1' \
     trainer.experiment_name=$experiment_name \
     trainer.n_gpus_per_node=2 \

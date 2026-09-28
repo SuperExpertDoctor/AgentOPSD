@@ -76,7 +76,8 @@ python3 -m verl.trainer.main_opsd \
     env.search.search_url='http://0.0.0.0:8000/retrieve' \
     trainer.device=cuda \
     trainer.critic_warmup=0 \
-    trainer.logger=['console','wandb'] \
+    trainer.logger="['console','wandb','tensorboard']" \
+    +ray_init.runtime_env.env_vars.TENSORBOARD_DIR="/root/tf-logs/search_3b/${experiment_name}" \
     trainer.project_name='verl_agent_search' \
     trainer.experiment_name=$experiment_name \
     trainer.n_gpus_per_node=4 \
