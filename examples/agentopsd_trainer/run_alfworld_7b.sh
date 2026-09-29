@@ -29,7 +29,10 @@ skill_all=false
 train_data_size=16
 val_data_size=128
 group_size=8
-experiment_name="${AGENTOPSD_METHOD_NAME:-AgentOPSD}_alfworld_${granularity}_lambda${mult_lambda}_skill${skill_all}"
+experiment_name="${AGENTOPSD_METHOD_NAME:-AgentOPSD}_alfworld_${granularity}_lambda${mult_lambda}_skill${skill_all}_7b_lora16"
+OUTPUT_DIR="${AGENTOPSD_REPO_ROOT}/outputs/${experiment_name}"
+export SAVE_CGTD_DEBUG_DIR="${SAVE_CGTD_DEBUG_DIR:-${OUTPUT_DIR}/opsd_debug}"
+export WANDB_DIR="${OUTPUT_DIR}"
 export ALFWORLD_DATA="${ASSET_DATA_DIR}/alfworld"
 
 export WANDB_API_KEY=your_key_here
@@ -43,6 +46,7 @@ if [[ ! -f "$TRAIN_DATA" || ! -f "$VAL_DATA" ]]; then
 fi
 
 "$PYTHON_BIN" -m verl.trainer.main_opsd \
+    hydra.run.dir="${OUTPUT_DIR}/hydra/${AGENTOPSD_RUN_ID}" \
     algorithm.adv_estimator=grpo \
     data.train_files=$TRAIN_DATA \
     data.val_files=$VAL_DATA \
@@ -54,6 +58,8 @@ fi
     data.truncation='error' \
     data.return_raw_chat=True \
     local_assets.model_path=$MODEL_PATH \
+    actor_rollout_ref.model.lora_rank=16 \
+    actor_rollout_ref.model.lora_alpha=16 \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=256 \
@@ -94,11 +100,17 @@ fi
     trainer.critic_warmup=0 \
     trainer.logger="['console','wandb','tensorboard']" \
     +ray_init.runtime_env.env_vars.TENSORBOARD_DIR="/root/tf-logs/alfworld_7b/${experiment_name}" \
+    +ray_init.runtime_env.env_vars.WANDB_DIR="${WANDB_DIR}" \
+    +ray_init.runtime_env.env_vars.SAVE_CGTD_DEBUG="${SAVE_CGTD_DEBUG:-0}" \
+    +ray_init.runtime_env.env_vars.SAVE_CGTD_DEBUG_DIR="${SAVE_CGTD_DEBUG_DIR}" \
     trainer.project_name='verl_agent_alfworld' \
     trainer.experiment_name=$experiment_name \
     trainer.ray_wait_register_center_timeout=600 \
     trainer.nnodes=1 \
-    trainer.save_freq=-1 \
+    trainer.default_local_dir="${OUTPUT_DIR}/checkpoints" \
+    +trainer.adapter_only_checkpoint=true \
+    trainer.save_freq=50 \
+    trainer.resume_mode=disable \
     trainer.test_freq=5 \
     trainer.total_epochs=150 \
     trainer.val_before_train=True $@

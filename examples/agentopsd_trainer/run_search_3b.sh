@@ -31,7 +31,9 @@ mult_lambda=0.5
 granularity=token
 skill_all=false
 
-experiment_name="${AGENTOPSD_METHOD_NAME:-AgentOPSD}_search_${granularity}_lambda${mult_lambda}_skill${skill_all}"
+experiment_name="${AGENTOPSD_METHOD_NAME:-AgentOPSD}_search_${granularity}_lambda${mult_lambda}_skill${skill_all}_3b_lora16"
+OUTPUT_DIR="${AGENTOPSD_REPO_ROOT}/outputs/${experiment_name}"
+export SAVE_CGTD_DEBUG_DIR="${SAVE_CGTD_DEBUG_DIR:-${OUTPUT_DIR}/opsd_debug}"
 
 train_data_size=128
 val_data_size=512
@@ -54,6 +56,7 @@ if [[ "${RETRIEVAL_CHECK_ONLY:-0}" == "1" ]]; then
 fi
 
 "$PYTHON_BIN" -m verl.trainer.main_opsd \
+    hydra.run.dir="${OUTPUT_DIR}/hydra/${AGENTOPSD_RUN_ID}" \
     algorithm.adv_estimator=grpo \
     data.train_files=$TRAIN_DATA \
     data.val_files=$VAL_DATA \
@@ -67,6 +70,8 @@ fi
     local_assets.data_dir=$ASSET_DATA_DIR \
     local_assets.weights_dir=$ASSET_WEIGHTS_DIR \
     local_assets.model_path=$MODEL_PATH \
+    actor_rollout_ref.model.lora_rank=16 \
+    actor_rollout_ref.model.lora_alpha=16 \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=0.1 \
     actor_rollout_ref.model.use_remove_padding=True \
@@ -111,11 +116,16 @@ fi
     trainer.critic_warmup=0 \
     trainer.logger="['console','tensorboard']" \
     +ray_init.runtime_env.env_vars.TENSORBOARD_DIR="/root/tf-logs/search_3b/${experiment_name}" \
+    +ray_init.runtime_env.env_vars.SAVE_CGTD_DEBUG="${SAVE_CGTD_DEBUG:-0}" \
+    +ray_init.runtime_env.env_vars.SAVE_CGTD_DEBUG_DIR="${SAVE_CGTD_DEBUG_DIR}" \
     trainer.project_name='verl_agent_search' \
     trainer.experiment_name=$experiment_name \
     trainer.ray_wait_register_center_timeout=600 \
     trainer.nnodes=1 \
-    trainer.save_freq=-1 \
+    trainer.default_local_dir="${OUTPUT_DIR}/checkpoints" \
+    +trainer.adapter_only_checkpoint=true \
+    trainer.save_freq=50 \
+    trainer.resume_mode=disable \
     trainer.test_freq=150 \
     trainer.total_training_steps=150 \
     trainer.val_before_train=False "$@"

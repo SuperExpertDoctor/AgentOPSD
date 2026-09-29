@@ -775,47 +775,61 @@ class ActorRolloutRefWorker(Worker):
         return output
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
-    def save_checkpoint(self, local_path, hdfs_path=None, global_step=0, max_ckpt_to_keep=None):
+    def save_checkpoint(self, local_path, hdfs_path=None, global_step=0, max_ckpt_to_keep=None, adapter_only=False):
         # only support save and load ckpt for actor
         assert self._is_actor
+        if adapter_only and not self._is_lora:
+            raise ValueError("Adapter-only export requires a LoRA actor")
 
         if self._is_offload_param:
             load_fsdp_model_to_gpu(self.actor_module_fsdp)
 
-        self.checkpoint_manager.save_checkpoint(local_path=local_path, hdfs_path=hdfs_path, global_step=global_step, max_ckpt_to_keep=max_ckpt_to_keep)
-        dist.barrier()
+        try:
+            if not adapter_only:
+                self.checkpoint_manager.save_checkpoint(local_path=local_path, hdfs_path=hdfs_path, global_step=global_step, max_ckpt_to_keep=max_ckpt_to_keep)
+                dist.barrier()
 
-        if self._is_lora and isinstance(self.actor_module, PeftModel):
-            lora_save_path = os.path.join(local_path, "lora_adapter")
-            peft_config = {}
-            if dist.get_rank() == 0:
-                os.makedirs(lora_save_path, exist_ok=True)
-                peft_config = asdict(self.actor_module.peft_config.get('default', {}))
-                peft_config['task_type'] = peft_config['task_type'].value
-                peft_config['peft_type'] = peft_config['peft_type'].value
-                peft_config['target_modules'] = list(peft_config['target_modules'])
-            try:
-                if isinstance(self.actor_module_fsdp, FSDP):
-                    self.actor_module_fsdp = self.actor_module_fsdp.cuda()
-                    lora_params = layered_summon_lora_params(self.actor_module_fsdp)
+            if self._is_lora and isinstance(self.actor_module, PeftModel):
+                lora_save_path = os.path.join(local_path, "lora_adapter")
+                error = None
+                try:
+                    if isinstance(self.actor_module_fsdp, FSDP):
+                        self.actor_module_fsdp = self.actor_module_fsdp.cuda()
+                        lora_params = layered_summon_lora_params(self.actor_module_fsdp)
+                    else:
+                        from peft.utils.save_and_load import get_peft_model_state_dict
+
+                        lora_params = get_peft_model_state_dict(self.actor_module)
+                    if dist.get_rank() == 0:
+                        if not lora_params:
+                            raise ValueError("No LoRA adapter parameters were collected")
+                        os.makedirs(lora_save_path, exist_ok=True)
+                        peft_config = asdict(self.actor_module.peft_config['default'])
+                        peft_config['task_type'] = peft_config['task_type'].value
+                        peft_config['peft_type'] = peft_config['peft_type'].value
+                        peft_config['target_modules'] = list(peft_config['target_modules'])
+                        save_file(lora_params, os.path.join(lora_save_path, "adapter_model.safetensors"))
+                        with open(os.path.join(lora_save_path, "adapter_config.json"), "w", encoding="utf-8") as f:
+                            json.dump(peft_config, f, ensure_ascii=False, indent=4)
+                except Exception as exc:
+                    error = f"{type(exc).__name__}: {exc}"
+                    if not adapter_only and dist.get_rank() == 0:
+                        print(f"[rank-{self.rank}]: Save LoRA Adapter Error ({error})")
+
+                if adapter_only:
+                    errors = [None] * dist.get_world_size()
+                    dist.all_gather_object(errors, error)
+                    if any(errors):
+                        raise RuntimeError(f"LoRA adapter export failed: {errors}")
                 else:
-                    from peft.utils.save_and_load import get_peft_model_state_dict
-
-                    lora_params = get_peft_model_state_dict(self.actor_module)
-                if dist.get_rank() == 0:
-                    save_file(lora_params, os.path.join(lora_save_path, "adapter_model.safetensors"))
-                    with open(os.path.join(lora_save_path, "adapter_config.json"), "w", encoding='utf-8') as f:
-                        json.dump(peft_config, f, ensure_ascii=False, indent=4)
-            except Exception as e:
-                if dist.get_rank() == 0:
-                    print(f"[rank-{self.rank}]: Save LoRA Adapter Error ({e})")
-
-            dist.barrier()
-            if dist.get_rank() == 0:
-                print(f"[rank-{self.rank}]: Saved LoRA adapter to: {lora_save_path}")
-
-        if self._is_offload_param:
-            offload_fsdp_model_to_cpu(self.actor_module_fsdp)
+                    dist.barrier()
+                if dist.get_rank() == 0 and error is None:
+                    print(f"[rank-{self.rank}]: Saved LoRA adapter to: {lora_save_path}")
+            elif adapter_only:
+                raise ValueError("Adapter-only export requires a PEFT LoRA model")
+        finally:
+            if self._is_offload_param:
+                offload_fsdp_model_to_cpu(self.actor_module_fsdp)
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def load_checkpoint(self, local_path, hdfs_path=None, del_local_after_load=False):

@@ -242,6 +242,17 @@ class OPSDRayTrainer(RayPPOTrainer):
         #     magnitude-only |V_k - V_{k-1}| z-score. Orthogonal to mult_signed.
         self.opsd_signed = opsd_cfg.get("signed", False)
 
+    def _save_checkpoint(self):
+        if not self.config.trainer.get("adapter_only_checkpoint", False):
+            return super()._save_checkpoint()
+
+        actor_path = os.path.join(
+            self.config.trainer.default_local_dir,
+            f"global_step_{self.global_steps}",
+            "actor",
+        )
+        self.actor_rollout_wg.save_checkpoint(actor_path, None, self.global_steps, adapter_only=True)
+
     def _get_opsd_mult_lambda(self, step: int) -> float:
         """Linearly decay belief_mult lambda from mult_lambda_init to 0 over
         warmdown_steps. warmdown_steps <= 0 disables decay (constant lambda).

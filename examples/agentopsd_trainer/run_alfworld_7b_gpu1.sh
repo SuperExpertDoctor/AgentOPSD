@@ -37,6 +37,8 @@ granularity="${GRANULARITY:-turn}"
 skill_all="${SKILL_ALL:-false}"
 
 experiment_name="${AGENTOPSD_METHOD_NAME:-AgentOPSD}_alfworld_gpu1_${granularity}_lora${lora_rank}"
+OUTPUT_DIR="${AGENTOPSD_REPO_ROOT}/outputs/${experiment_name}"
+export SAVE_CGTD_DEBUG_DIR="${SAVE_CGTD_DEBUG_DIR:-${OUTPUT_DIR}/opsd_debug}"
 
 if [[ ! -f "$TRAIN_DATA" || ! -f "$VAL_DATA" ]]; then
     "$PYTHON_BIN" -m examples.data_preprocess.prepare \
@@ -47,6 +49,7 @@ if [[ ! -f "$TRAIN_DATA" || ! -f "$VAL_DATA" ]]; then
 fi
 
 "$PYTHON_BIN" -m verl.trainer.main_opsd \
+    hydra.run.dir="${OUTPUT_DIR}/hydra/${AGENTOPSD_RUN_ID}" \
     algorithm.adv_estimator=grpo \
     data.train_files="$TRAIN_DATA" \
     data.val_files="$VAL_DATA" \
@@ -105,10 +108,15 @@ fi
     trainer.critic_warmup=0 \
     trainer.logger="['console','tensorboard']" \
     +ray_init.runtime_env.env_vars.TENSORBOARD_DIR="/root/tf-logs/alfworld_7b/${experiment_name}" \
+    +ray_init.runtime_env.env_vars.SAVE_CGTD_DEBUG="${SAVE_CGTD_DEBUG:-0}" \
+    +ray_init.runtime_env.env_vars.SAVE_CGTD_DEBUG_DIR="${SAVE_CGTD_DEBUG_DIR}" \
     trainer.project_name=verl_agent_alfworld \
     trainer.experiment_name="$experiment_name" \
     trainer.ray_wait_register_center_timeout=600 \
-    trainer.save_freq=-1 \
+    trainer.default_local_dir="${OUTPUT_DIR}/checkpoints" \
+    +trainer.adapter_only_checkpoint=true \
+    trainer.save_freq=50 \
+    trainer.resume_mode=disable \
     trainer.test_freq=5 \
     trainer.total_epochs=150 \
     trainer.val_before_train=True \
